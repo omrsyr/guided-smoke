@@ -21,6 +21,9 @@ const TEXTS = {
     approveIntro: 'This step changes something outside the page. Nothing happens until you allow it.',
     approveYes: '✔ Yes, do it',
     approveSkip: 'Skip',
+    todo: 'What you need to do',
+    change: 'What will change',
+    outcome: 'Result',
     loginTitle: 'Sign in first',
     loginDid: 'I opened the start page; the application asked for a sign-in.',
     loginExpect: [
@@ -54,6 +57,9 @@ const TEXTS = {
     approveIntro: 'Bu adım sayfanın dışında bir şeyi değiştirir. Sen izin vermeden hiçbir şey yapılmaz.',
     approveYes: '✔ Evet, yap',
     approveSkip: 'Atla',
+    todo: 'Senden beklenen',
+    change: 'Yapılacak değişiklik',
+    outcome: 'Sonuç',
     loginTitle: 'Önce giriş yap',
     loginDid: 'Başlangıç sayfasını açtım; uygulama giriş istedi.',
     loginExpect: [

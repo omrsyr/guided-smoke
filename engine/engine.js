@@ -112,6 +112,18 @@ function firstSeenIndex(elements) {
   });
 }
 
+/**
+ * The same locator without a trailing .first()/.nth(): a plan often narrows to the first match, which is exactly the
+ * hidden twin. Relies on playwright-core keeping the selector chain on the locator (pinned version); null otherwise.
+ */
+function widen(locator) {
+  try {
+    const selector = locator && locator._selector;
+    if (typeof selector !== 'string' || !/ >> nth=-?\d+$/.test(selector) || !locator._frame) return null;
+    return locator._frame.locator(selector.replace(/ >> nth=-?\d+$/, ''));
+  } catch { return null; }
+}
+
 function isLocal(base) {
   try {
     const host = new URL(base).hostname.replace(/^\[|\]$/g, '');
@@ -268,13 +280,16 @@ async function walk(o) {
   const mark = async locator => {
     try {
       const deadline = Date.now() + 3000;
-      let index = -1;
-      while (index < 0 && Date.now() < deadline) {
-        index = await locator.evaluateAll(firstSeenIndex).catch(() => -1);
-        if (index < 0) await page.waitForTimeout(200);
+      const wide = widen(locator);
+      let target = null;
+      while (!target && Date.now() < deadline) {
+        for (const candidate of wide ? [locator, wide] : [locator]) {
+          const index = await candidate.evaluateAll(firstSeenIndex).catch(() => -1);
+          if (index >= 0) { target = candidate.nth(index); break; }
+        }
+        if (!target) await page.waitForTimeout(200);
       }
-      if (index < 0) throw new Error('nothing to outline');
-      const target = locator.nth(index);
+      if (!target) throw new Error('nothing to outline');
       await target.evaluate(e => {
         const tall = e.getBoundingClientRect().height > window.innerHeight * 0.7;
         e.scrollIntoView({ block: tall ? 'start' : 'center', inline: 'nearest' });
@@ -323,13 +338,23 @@ async function walk(o) {
     const isReady = async () => plan.ready ? (await page.locator(plan.ready).count()) > 0 : !loginRe.test(page.url());
     const deadline = Date.now() + LOGIN_TIMEOUT_MS;
     await ctx.goto(start);
-    while (!(await isReady())) {
+    while (!closed && !(await isReady().catch(() => false))) {
       if (Date.now() > deadline) throw new Error('Sign-in was not completed within 15 minutes.');
-      await draw({ header: format(t.step, { n: 0, total }), accent: COLORS.warn, t, didLabel: t.did, expectLabel: t.expect,
+      await draw({ header: format(t.step, { n: 0, total }), accent: COLORS.warn, t, didLabel: t.did, expectLabel: t.todo,
         title: t.loginTitle, did: t.loginDid, expect: t.loginExpect, buttons: [] });
       await page.waitForURL(u => !loginRe.test(u.toString()), { timeout: LOGIN_TIMEOUT_MS }).catch(() => {});
-      await page.waitForTimeout(1500);
-      await ctx.goto(start);
+      if (closed) break;
+      await page.waitForTimeout(1500).catch(() => {});
+      await ctx.goto(start).catch(() => {});
+    }
+    if (closed) {
+      // The window was closed before signing in: a stop, not an error.
+      meta.endedAt = new Date().toISOString();
+      meta.result = 'stopped';
+      meta.error = 'browser closed before sign-in';
+      saveMeta();
+      if (options.fresh) fs.rmSync(profile, { recursive: true, force: true });
+      return { meta, counts, signedOut: false };
     }
     meta.readyAt = new Date().toISOString();
     saveMeta();
@@ -352,6 +377,7 @@ async function walk(o) {
         if (!decision) {
           const res = await ask(panelFor(n, s, {
             accent: COLORS.warn, title: `${t.approveTitle}: ${s.title}`, did: t.approveIntro, expect: [what], shot: false,
+            expectLabel: t.change,
             buttons: [
               { label: (s.approve && s.approve.yes) || t.approveYes, value: 'approved', color: COLORS.yes },
               { label: t.approveSkip, value: 'skip', color: COLORS.skip },
@@ -402,7 +428,7 @@ async function walk(o) {
 
     // ---- closing screen ----
     const closing = closed ? { a: 'close' } : await ask({
-      header: format(t.step, { n: total, total }), accent: COLORS.info, t, didLabel: t.did, expectLabel: t.expect,
+      header: format(t.step, { n: total, total }), accent: COLORS.info, t, didLabel: t.did, expectLabel: t.outcome,
       title: t.doneTitle, did: t.doneDid, expect: [format(t.doneSummary, counts)], shot: false,
       buttons: [
         { label: t.close, value: 'close', color: COLORS.info },
@@ -424,4 +450,4 @@ async function walk(o) {
   }
 }
 
-module.exports = { walk, isLocal, normalizeCheck, drawPanel, firstSeenIndex, PACE };
+module.exports = { walk, isLocal, normalizeCheck, drawPanel, firstSeenIndex, widen, PACE };

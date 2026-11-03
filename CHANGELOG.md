@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2 — 2026-11-03
+
+- `mark(locator.first())` still outlined nothing when the first match was the hidden twin: `.first()` narrows the
+  locator before the engine can choose. The engine now widens a locator narrowed with `.first()`/`.nth()` when that
+  element is not on screen and outlines the first visible match of the same selector. The template no longer uses
+  `.first()`, and writing-steps says to pass the whole locator.
+- The sign-in, permission and closing panels no longer say "what you should see (outlined in orange)" — nothing is
+  outlined there. They read "What you need to do", "What will change" and "Result".
+
 ## 0.1.1 — 2026-11-03
 
 - **Outline the element a person can see.** `mark()` skipped the outline when the first match was hidden — common

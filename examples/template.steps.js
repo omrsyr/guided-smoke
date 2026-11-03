@@ -14,7 +14,7 @@ module.exports = {
       title: 'Start page opened',
       did: 'I opened the start page.',
       expect: ['The page opens without an error.'],
-      run: async ({ page, mark }) => { await mark(page.locator('h1, h2').first()); },
+      run: async ({ page, mark }) => { await mark(page.locator('h1, h2')); },
       check: async ({ page }) => [(await page.locator('h1, h2').count()) > 0, 'A heading is on the page.', 'No heading found.'],
     },
   ],

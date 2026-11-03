@@ -21,7 +21,7 @@ const report = require('./report');
 const { pickLanguage, systemLocale, LANGUAGES } = require('./i18n');
 
 const PLAYWRIGHT_VERSION = '1.63.0';
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 
 const EXIT = { ok: 0, error: 1, usage: 2, runtime: 3, resolve: 4 };
 

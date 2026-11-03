@@ -54,8 +54,10 @@ the panel shows the error as a failed check and the user decides.
    where to look ("at the top", "in the row of …") and what must be absent when that matters.
 4. **Mark every step.** `mark()` the element the user should look at; for a message, the message; for a table change,
    the row. `mark()` outlines the first match a person can see — layouts often hold screen-reader-only twins (a hidden
-   `h2` before the page title) — but a specific selector (`page.locator('h2', { hasText: '…' })`) is still better.
-   When nothing visible matches, the panel shows "the place to look at was not found"; treat that as a plan bug.
+   `h2` before the page title). Give it the whole locator, **not** `.first()`: `.first()` picks the hidden twin before
+   the engine can choose (it widens a narrowed locator as a fallback, but do not rely on it). A specific selector
+   (`page.locator('h2', { hasText: '…' })`) is best. When nothing visible matches, the panel shows "the place to look
+   at was not found"; treat that as a plan bug.
 5. **Check whenever it can be checked.** The automatic check is a second pair of eyes, not a replacement for the user.
 6. **Order:** setup → happy path → validation errors → edge cases (expired, limits, empty) → confirmations and
    permissions → help pages → the other language → clean-up. A step may rely on the previous ones; `--from`/`--only`
