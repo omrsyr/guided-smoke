@@ -33,6 +33,7 @@ const TEXTS = {
     close: 'Close',
     signOut: 'Sign out and clear the profile',
     filtered: 'Only the selected steps run; earlier steps must already be in place.',
+    markMissing: '⚠ The place to look at was not found on the page, so nothing is outlined.',
   },
   tr: {
     step: 'Smoke {n} / {total}',
@@ -65,6 +66,7 @@ const TEXTS = {
     close: 'Kapat',
     signOut: 'Çıkış yap ve profili temizle',
     filtered: 'Yalnız seçilen adımlar koşuyor; önceki adımların yaptıkları zaten yerinde olmalı.',
+    markMissing: '⚠ Bakılacak yer sayfada bulunamadı, bu yüzden çerçeve çizilmedi.',
   },
 };
 
@@ -78,6 +80,16 @@ function pickLanguage(requested) {
   return 'en';
 }
 
+/**
+ * The browser locale when none is given: the system's (tr-TR here), so date inputs and the browser's own validation
+ * messages read as the user reads them. GUIDED_SMOKE_LOCALE overrides; null when nothing usable is found.
+ */
+function systemLocale(raw = process.env.GUIDED_SMOKE_LOCALE || Intl.DateTimeFormat().resolvedOptions().locale) {
+  const m = /^([a-zA-Z]{2})(?:[-_]([a-zA-Z]{2}))?(?:\b|$)/.exec(String(raw || ''));
+  if (!m) return null;
+  return m[2] ? `${m[1].toLowerCase()}-${m[2].toUpperCase()}` : m[1].toLowerCase();
+}
+
 function texts(lang) {
   return TEXTS[lang] || TEXTS.en;
 }
@@ -86,4 +98,4 @@ function format(template, values) {
   return template.replace(/\{(\w+)\}/g, (_, k) => (values[k] === undefined ? '' : String(values[k])));
 }
 
-module.exports = { pickLanguage, texts, format, LANGUAGES: Object.keys(TEXTS) };
+module.exports = { pickLanguage, systemLocale, texts, format, LANGUAGES: Object.keys(TEXTS) };

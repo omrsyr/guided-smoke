@@ -73,6 +73,15 @@ test('only loopback addresses count as local', () => {
   for (const u of ['https://erp.example.com', 'https://10.0.0.5', 'not a url']) assert.ok(!isLocal(u), u);
 });
 
+test('the default browser locale is the system one, normalised', () => {
+  const { systemLocale } = require('../i18n');
+  assert.strictEqual(systemLocale('tr-TR'), 'tr-TR');
+  assert.strictEqual(systemLocale('en_us'), 'en-US');
+  assert.strictEqual(systemLocale('de'), 'de');
+  assert.strictEqual(systemLocale('zh-Hans-CN'), 'zh');
+  assert.strictEqual(systemLocale(''), null);
+});
+
 test('checks may return a boolean, [ok, text] or [ok, okText, failText]', () => {
   assert.deepStrictEqual(normalizeCheck(true), { ok: true, text: '' });
   assert.deepStrictEqual(normalizeCheck([false, 'x']), { ok: false, text: 'x' });

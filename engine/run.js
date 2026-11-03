@@ -18,10 +18,10 @@ const { spawnSync } = require('child_process');
 const store = require('./store');
 const browser = require('./browser');
 const report = require('./report');
-const { pickLanguage, LANGUAGES } = require('./i18n');
+const { pickLanguage, systemLocale, LANGUAGES } = require('./i18n');
 
 const PLAYWRIGHT_VERSION = '1.63.0';
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 const EXIT = { ok: 0, error: 1, usage: 2, runtime: 3, resolve: 4 };
 
@@ -170,6 +170,7 @@ async function main() {
     try { chosen = browser.choose(flags.browser); } catch (e) { browserError = e.message; }
     const data = {
       version: VERSION, node: process.version, platform: process.platform, root: store.dataRoot(), project, runtime,
+      locale: systemLocale(),
       systemDefault: browser.systemDefault(), chrome: browser.installed('chrome'), edge: browser.installed('edge'),
       browser: chosen, browserError,
     };
@@ -303,7 +304,7 @@ async function main() {
       options: {
         browser: chosen, base, pace: flags.pace || 'slow', allowed, filterNote, skipWrites: !!flags['skip-writes'],
         allowRemoteWrites: !!flags['allow-remote-writes'], workItem: flags['work-item'] || plan.workItem || null,
-        fresh: !!flags.fresh, screens: flags.screens || null, locale: flags.locale || plan.locale || null,
+        fresh: !!flags.fresh, screens: flags.screens || null, locale: flags.locale || plan.locale || systemLocale(),
         lang: pickLanguage(flags.lang || plan.lang), keepDownloads: !!flags['keep-downloads'],
       },
     });

@@ -13,7 +13,7 @@ compatibility: >
   Edge installed; the application under test reachable from this machine.
 metadata:
   author: omrsyr
-  version: "0.1.0"
+  version: "0.1.1"
 ---
 
 # guided-smoke
@@ -57,7 +57,7 @@ Flags (order free; unknown flags and bad values are refused with a clear message
 | `--allow-remote-writes` | Allow permitted steps when the address is not localhost (off by default) |
 | `--work-item <no>` | Attach a work item to the walk and the report |
 | `--screens diff\|all` | Screenshots on ✖ answers or on every step (default: none; the panel always has a 📷 button) |
-| `--locale tr-TR\|en-US` | Browser locale (date inputs, validation messages) |
+| `--locale tr-TR\|en-US` | Browser language and locale (date inputs, validation messages). Default: the plan's `locale`, else the system's |
 | `--fresh` | Throw-away browser profile for this walk (sign in again, nothing kept) |
 | `--reset-login` | Delete this project's saved sign-in (`node engine/run.js reset-login`) |
 

@@ -53,7 +53,8 @@ ister; skill klasörüne değil. İstersen kendin de kurabilirsin: `node ~/.clau
 ```
 
 İşe yarayan bayraklar: `--browser chrome|edge`, `--base https://localhost:5001`, `--pace slow|normal|fast`, `--from 5`,
-`--only 3,7-9`, `--screens diff|all`, `--locale tr-TR`, `--skip-writes`, `--fresh`. Ayrıntı: [SKILL.md](SKILL.md).
+`--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (varsayılan: sistemin dili), `--skip-writes`, `--fresh`.
+Ayrıntı: [SKILL.md](SKILL.md).
 
 ## Giriş ve veriler
 

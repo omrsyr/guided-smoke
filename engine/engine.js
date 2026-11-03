@@ -52,12 +52,14 @@ function drawPanel(s) {
     body.appendChild(el('div', (s.auto.ok ? s.t.autoOk : s.t.autoFail) + s.auto.text,
       { marginTop: '8px', fontWeight: '600', color: s.auto.ok ? '#198754' : '#dc3545' }));
   }
+  if (s.warn) body.appendChild(el('div', s.warn, { marginTop: '8px', fontWeight: '600', color: '#b35c00' }));
   const note = el('textarea', null, { display: 'none', width: '100%', marginTop: '8px', minHeight: '60px', boxSizing: 'border-box' });
   note.placeholder = s.t.notePlaceholder;
   body.appendChild(note);
   const bar = el('div', null, { display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' });
   const clear = () => document.querySelectorAll('[data-guided-smoke-mark]').forEach(x => {
     x.style.outline = x.getAttribute('data-guided-smoke-mark');
+    x.style.outlineOffset = '';
     x.removeAttribute('data-guided-smoke-mark');
   });
   (s.buttons || []).forEach(b => {
@@ -95,6 +97,19 @@ function drawPanel(s) {
     min.textContent = hidden ? s.t.minimize : s.t.open;
   };
   document.body.appendChild(box);
+}
+
+// Runs in the page. Index of the first element a person can actually see: Playwright's own "visible" accepts
+// screen-reader-only elements (1×1 px, clipped), which layouts often place before the real heading.
+function firstSeenIndex(elements) {
+  return elements.findIndex(e => {
+    const r = e.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) return false;
+    const s = getComputedStyle(e);
+    if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return false;
+    if (/^rect\(0(px)?,?\s*0(px)?,?\s*0(px)?,?\s*0(px)?\)$/.test(s.clip) || s.clipPath === 'inset(50%)') return false;
+    return true;
+  });
 }
 
 function isLocal(base) {
@@ -183,7 +198,9 @@ async function walk(o) {
     slowMo: PACE[options.pace] ?? PACE.slow,
     ignoreHTTPSErrors: true,
     viewport: null,
-    args: ['--start-maximized'],
+    // `locale` alone changes the page's language; the browser's own texts (validation balloons, date input format)
+    // follow its UI language, which only --lang sets.
+    args: ['--start-maximized', ...(options.locale ? [`--lang=${options.locale}`] : [])],
     acceptDownloads: true,
     ...(options.locale ? { locale: options.locale } : {}),
   });
@@ -244,16 +261,33 @@ async function walk(o) {
     return { ...res, seconds: Math.round((Date.now() - shownAt) / 1000) };
   };
 
+  // Outlines the first match a person can see: layouts often hold hidden twins (screen-reader headings, templates)
+  // earlier in the page. A tall element is brought in by its top edge, clear of a fixed header; a short one is centred.
+  // When nothing seen matches within 3 s, the panel says so instead of silently showing no outline.
+  let markMissing = false;
   const mark = async locator => {
     try {
-      const target = locator.first();
-      await target.scrollIntoViewIfNeeded({ timeout: 3000 });
+      const deadline = Date.now() + 3000;
+      let index = -1;
+      while (index < 0 && Date.now() < deadline) {
+        index = await locator.evaluateAll(firstSeenIndex).catch(() => -1);
+        if (index < 0) await page.waitForTimeout(200);
+      }
+      if (index < 0) throw new Error('nothing to outline');
+      const target = locator.nth(index);
       await target.evaluate(e => {
+        const tall = e.getBoundingClientRect().height > window.innerHeight * 0.7;
+        e.scrollIntoView({ block: tall ? 'start' : 'center', inline: 'nearest' });
+        if (tall) window.scrollBy(0, -96);
         if (!e.hasAttribute('data-guided-smoke-mark')) e.setAttribute('data-guided-smoke-mark', e.style.outline || '');
-        e.style.outline = '3px solid #f59f00';
-        e.style.outlineOffset = '2px';
+        e.style.outline = '4px solid #f59f00';
+        e.style.outlineOffset = '3px';
       });
-    } catch { /* the element may be missing; the automatic check reports it */ }
+      return true;
+    } catch {
+      markMissing = true;
+      return false;
+    }
   };
 
   const ctx = {
@@ -309,6 +343,7 @@ async function walk(o) {
       if (options.allowed && !options.allowed.has(n)) { record({ n, title: s.title, answer: 'skip', reason: 'filter' }); continue; }
       shotIndex = n;
       lastShot = null;
+      markMissing = false;
 
       if (s.approve) {
         const what = typeof s.approve === 'string' ? s.approve : s.approve.what;
@@ -345,6 +380,7 @@ async function walk(o) {
 
       const res = await ask(panelFor(n, s, {
         auto,
+        warn: markMissing ? t.markMissing : null,
         buttons: [
           { label: t.pass, value: 'pass', color: COLORS.pass },
           { label: t.diff, value: 'diff', color: COLORS.diff, needsNote: true },
@@ -353,7 +389,8 @@ async function walk(o) {
       }));
       if (res.a === 'diff' && options.screens === 'diff' && !lastShot) { try { lastShot = await takeShot(n); } catch { /* keep going */ } }
       record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: res.a, note: res.note || undefined,
-        auto: auto || undefined, error: runError ? firstLine(runError) : undefined, seconds: res.seconds, screenshot: lastShot || undefined });
+        auto: auto || undefined, error: runError ? firstLine(runError) : undefined, markMissing: markMissing || undefined,
+        seconds: res.seconds, screenshot: lastShot || undefined });
       if (res.a === 'stop') { stopped = true; break; }
     }
     shotIndex = null;
@@ -387,4 +424,4 @@ async function walk(o) {
   }
 }
 
-module.exports = { walk, isLocal, normalizeCheck, drawPanel, PACE };
+module.exports = { walk, isLocal, normalizeCheck, drawPanel, firstSeenIndex, PACE };

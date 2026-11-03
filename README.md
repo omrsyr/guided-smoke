@@ -53,7 +53,8 @@ Say "run a smoke for this" or type:
 ```
 
 Useful flags: `--browser chrome|edge`, `--base https://localhost:5001`, `--pace slow|normal|fast`, `--from 5`,
-`--only 3,7-9`, `--screens diff|all`, `--locale tr-TR`, `--skip-writes`, `--fresh`. See [SKILL.md](SKILL.md).
+`--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (default: your system's), `--skip-writes`, `--fresh`.
+See [SKILL.md](SKILL.md).
 
 ## Sign-in and data
 
