@@ -1,6 +1,7 @@
 # Writing steps
 
-A plan is a CommonJS module in `plans/<plan-id>/steps.js`. See `examples/example.steps.js` for every kind of step.
+A plan is a CommonJS module in `plans/<plan-id>/steps.js`. See `examples/demo/steps.js` (runnable with
+`node engine/run.js demo`) for every kind of step.
 
 ```js
 module.exports = {
@@ -37,13 +38,19 @@ The step context (`ctx`) offers:
 | `submit(locator)` | Click and wait for the page that loads (POST / redirect) |
 | `goto(path)` | Open a path relative to `base` |
 | `download(locator)` | Click, save the download, return `{ name, size }`; the file is deleted unless `--keep-downloads` |
-| `text(locator)` | Visible text of the first match, whitespace collapsed (uses `textContent`) |
+| `text(locator)` | Text of the first match a person can see (the one `mark()` outlines), whitespace collapsed (uses `textContent`) |
 | `visible(locator)`, `count(locator)` | Small helpers |
+| `secretBox({ title, fields })` | A box on the page where the user types values a step needs (an API account); `null` removes it |
+| `inPage(fn, arg)` | Run `fn({ fields, arg })` inside the page; the box's values come back masked as `•••`. Waits while a required field is empty |
+| `poll(fn, { until, timeout, interval })` | Call `fn` until `until(value)` holds (default: truthy) or `timeout` ms pass (default 30000, every 1000); returns the last value |
 | `state` | An object shared by all steps of the walk |
 | `sleep(ms)`, `url(path)`, `log(msg)`, `walkDir` | — |
 
 `check` returns `true/false`, `[ok, text]`, `[ok, okText, failText]` or `{ ok, text }`. If `run` or `check` throws,
 the panel shows the error as a failed check and the user decides.
+
+For an API that needs the user's account, the project's database tool, or a background job, see
+[patterns](patterns.md).
 
 ## Rules
 
@@ -57,7 +64,11 @@ the panel shows the error as a failed check and the user decides.
    `h2` before the page title). Give it the whole locator, **not** `.first()`: `.first()` picks the hidden twin before
    the engine can choose (it widens a narrowed locator as a fallback, but do not rely on it). A specific selector
    (`page.locator('h2', { hasText: '…' })`) is best. When nothing visible matches, the panel shows "the place to look
-   at was not found"; treat that as a plan bug.
+   at was not found"; when several visible elements match (`hasText` matches substrings: two paragraphs carrying the
+   same phrase), it says only the first is outlined, and `text()` says so too if their texts differ. Treat both as
+   plan bugs: narrow the locator (an exact `hasText` regex, the containing card, an id). A step with nothing on the
+   screen to look at (a database count, a job waited for — see [patterns](patterns.md)) does not call `mark()`; its
+   panel then heads `expect` with "What to expect" instead of pointing at an orange outline.
 5. **Check whenever it can be checked.** The automatic check is a second pair of eyes, not a replacement for the user.
 6. **Order:** setup → happy path → validation errors → edge cases (expired, limits, empty) → confirmations and
    permissions → help pages → the other language → clean-up. A step may rely on the previous ones; `--from`/`--only`
@@ -74,3 +85,5 @@ the panel shows the error as a failed check and the user decides.
     balloon, click submit and read `validity` / `validationMessage` of the field.
 13. **Stable selectors:** ids, `data-*`, form `action*="handler=…"`, a row filtered by its exact cell text. Avoid
     positions (`nth`) unless the order is the thing being tested.
+14. **Values the user must give** (an account for an API call) go into `secretBox`, never into the plan, a constant,
+    an environment variable or the chat. See [patterns](patterns.md#calling-an-api-with-the-users-account).

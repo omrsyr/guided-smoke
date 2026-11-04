@@ -7,6 +7,9 @@
 - The smoke profile (`profiles/<project>-<browser>`) keeps the session cookie between walks; Chrome and Edge encrypt
   it with the operating system's key. Password saving is switched off in that profile. `--fresh` uses a throw-away
   profile; `reset-login` and the closing screen's "Sign out and clear the profile" delete it.
+- A step that needs an account of its own (an API call) asks the user to type it into the value box (`secretBox`).
+  The values stay in the page: the engine never reads them, `inPage` masks them (`•••`) in what it returns, and a
+  page load clears them. Masking is a safety net, not a licence: return only statuses and counts.
 - Never print connection strings, keys, license keys or file contents into the panel, the events, the report or the
   chat. Read configuration without echoing it.
 
@@ -37,7 +40,7 @@ steps too (see writing-steps rule 8).
 
 ## What is recorded
 
-`events.jsonl` keeps step numbers and titles, answers, notes, automatic-check texts, durations, and screenshot paths.
-It never keeps page HTML, cookies, values typed into forms, or credentials. Screenshots are taken only on request
+`events.jsonl` keeps step numbers and titles, answers, notes, automatic-check texts, plan warnings, durations, and
+screenshot paths. It never keeps page HTML, cookies, values typed into forms or the value box, or credentials. Screenshots are taken only on request
 (📷, `--screens diff|all`) and stay in the walk folder on this machine; they may show personal data, so treat them
 like the screen itself.

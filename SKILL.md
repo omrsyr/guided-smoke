@@ -39,6 +39,7 @@ guided-smoke plan [<id>]              prepare (or show) a plan only — no brows
 guided-smoke run <ref>                run a plan: a new walk is numbered after the last one
 guided-smoke list                     plans and walks of this project
 guided-smoke report <ref>             report of a walk (default: the latest walk of the plan)
+guided-smoke demo                     try it on the built-in demo application (no project needed)
 ```
 
 `<ref>` is a plan id (`6655-machine-expiry`), a walk id (`6655-machine-expiry-2`), a work item (`6655` — its only
@@ -70,6 +71,9 @@ node run.js doctor                    data folder, project, chosen browser, runt
 node run.js setup                     install playwright-core once (asks npm; get the user's OK first)
 node run.js init <plan-id> [--title T] [--work-item N]   create plans/<plan-id>/steps.js from the template
 node run.js run <ref|file.js> [flags] run a walk (start it in the background and wait for it to finish)
+node run.js demo [flags]              start the demo application and walk its plan (same flags as run, except
+                                      --base, --work-item, --allow-remote-writes); walks are kept under project
+                                      guided-smoke-demo (report demo --project guided-smoke-demo)
 node run.js list | report <ref> | reset-login | paths
 ```
 
@@ -81,14 +85,16 @@ The project is the git repository's folder name (override with `--project`). Dat
 ## Load the applicable guidance
 
 - Always: [safety rules](references/safety.md).
-- `guided-smoke` and `plan`: [workflow](references/workflow.md) and [writing steps](references/writing-steps.md).
+- `guided-smoke` and `plan`: [workflow](references/workflow.md) and [writing steps](references/writing-steps.md);
+  [patterns](references/patterns.md) when a step calls an API with an account, uses the project's database tool or
+  waits for a background job.
 - `run`: [workflow](references/workflow.md) (preflight and while it runs).
 - `report`, and after every walk: [report](references/report.md).
 
 ## Rules that always hold
 
 - The user signs in. Never type, store, print or ask for a password; the browser's own password saving is off in the
-  smoke profile.
+  smoke profile. An account a step needs for an API call is typed by the user into the value box (`secretBox`).
 - A permitted step (`approve`) is the only way to change anything outside the page. Show exactly what will change, limit
   it to one test record, and never print connection strings or keys.
 - Walk records are never overwritten; a re-run is a new walk.

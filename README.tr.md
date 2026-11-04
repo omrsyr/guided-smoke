@@ -6,6 +6,8 @@ skill'i: Playwright her adımı kendisi yapar, sayfadaki panel **ne yapıldığ�
 
 [English](README.md)
 
+![Demo koşusundan bir adım (İngilizce panel): kaydedildi mesajı turuncu çerçeveli; panel ne yapıldığını, ne görülmesi gerektiğini ve otomatik kontrolün sonucunu yazıyor](docs/screenshot.png)
+
 Tarayıcı testi yapan skill'lerin çoğu testleri kendisi koşar ve sana sonuç verir. `guided-smoke` ise bir değişiklik
 incelemeye gitmeden önceki ana göre: birinin ekrana bakıp "evet, doğru" demesi gerektiği an. Bunun için kontrol
 listesini okuman, tek başına tıklaman ya da hızla akıp giden bir betiği izlemen gerekmez.
@@ -16,8 +18,12 @@ listesini okuman, tek başına tıklaman ya da hızla akıp giden bir betiği iz
   sana numaralı liste olarak gösterir.
 - Onayından sonra tarayıcı açılır. Her adımda betik işi yapar, yeri işaretler, otomatik kontrolü koşar ve bekler:
   - **✔ Doğru, devam** · **✖ Farklı** (kısa bir not yaz) · **■ Durdur** · **📷 Ekran görüntüsü kaydet** · **Küçült**
+  - Otomatik kontrol ✖ verdiyse **✔** ikinci bir tıklama ister; rapor o adımı işaretler.
 - **Sayfanın dışında** bir şeyi değiştiren adımlar (veritabanı satırı, dosya, e-posta) önce sorar: **Evet, yap / Atla /
   Durdur**. Yerel olmayan bir adreste sen izin vermedikçe kapalıdır.
+- Kendi hesabıyla bir API çağıran adım, o hesabı sayfadaki **değer kutusuna** yazmanı ister. Çağrı sayfanın içinde
+  yapılır; betik değerleri hiç görmez, geri aldığı sonuçta da maskelenirler. Kutuyu doldurmadan ilerlersen adım kutuyu
+  bekler.
 - Her cevap anında kaydedilir. **Rapor** geçeni ve farklı olanı, ölçülen koşu süresini, önceki koşudan bu yana neyin
   değiştiğini ve iş kaydına yapıştırılacak bir bloğu verir.
 - Düzeltmeden sonra `run 6655 --retry-failed` yalnız ✖ işaretli adımları koşar.
@@ -38,6 +44,18 @@ Windows (PowerShell): `git clone https://github.com/omrsyr/guided-smoke "$env:US
 
 Yeni bir Claude Code session'ı aç. İlk koşu `playwright-core`'u (birkaç MB, npm'den) veri klasörüne kurmak için izin
 ister; skill klasörüne değil. İstersen kendin de kurabilirsin: `node ~/.claude/skills/guided-smoke/engine/run.js setup`.
+
+## Dene
+
+```bash
+node ~/.claude/skills/guided-smoke/engine/run.js setup     # bir kez: playwright-core veri klasörüne
+node ~/.claude/skills/guided-smoke/engine/run.js demo
+```
+
+127.0.0.1'de küçük bir demo uygulaması açılır ve tarayıcında 14 adımlık bir koşu başlar: sayfada yazan hesapla giriş
+yap, sonra paneli izle (yaklaşık 5 dakika). Her adım türü var: form, tarayıcının engellediği bir doğrulama, indirme,
+pencere, iki izinli adım, arka plan işi ve değer kutusuyla API çağrıları. Makinenden hiçbir şey çıkmaz; demo
+kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin.
 
 ## Kullanım
 
@@ -67,15 +85,19 @@ Ayrıntı: [SKILL.md](SKILL.md).
 - Kayda giren: adım başlıkları, cevapların ve notların, otomatik kontrol metinleri, süreler. Girmeyen: sayfanın HTML'i,
   çerezler, form değerleri, kimlik bilgileri. Ekran görüntüsü yalnız sen istersen.
 
+![Sol alttaki değer kutusu (İngilizce panel): API hesabını kullanıcı yazdı; kutuda görünen sonuçta e-posta da parola da yok](docs/screenshot-box.png)
+
 ## Plan yazmak
 
 Plan küçük bir JavaScript modülü; Claude yazar, sen düzenleyebilirsin. Bkz.
-[references/writing-steps.md](references/writing-steps.md) ve [examples/example.steps.js](examples/example.steps.js).
+[references/writing-steps.md](references/writing-steps.md) ve [examples/demo/steps.js](examples/demo/steps.js).
 
 ## Geliştirme
 
 ```bash
 node --test engine/test/engine.test.js     # tarayıcı gerekmez
+node --test engine/test/demo.test.js       # demo, Chrome ya da Edge'de headless (setup gerekir)
+node examples/demo/screenshots.js          # docs/ altındaki görüntüleri yeniden üret
 node engine/run.js doctor
 ```
 

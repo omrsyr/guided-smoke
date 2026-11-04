@@ -6,6 +6,7 @@
 //   node run.js doctor                                 data folder, project, browser, runtime
 //   node run.js init <plan-id> [--title T] [--work-item N] [--force]
 //   node run.js run <plan|walk|work-item|file.js> [flags]
+//   node run.js demo [flags]                           walk the demo plan against the built-in demo application
 //   node run.js list
 //   node run.js report <plan|walk|work-item>
 //   node run.js reset-login [--browser chrome|edge]
@@ -35,6 +36,10 @@ const FLAGS = {
     browser: 'value', base: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool',
     'skip-writes': 'bool', 'allow-remote-writes': 'bool', 'work-item': 'value', fresh: 'bool', screens: 'value',
     locale: 'value', lang: 'value', 'keep-downloads': 'bool',
+  },
+  demo: {
+    browser: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool', 'skip-writes': 'bool',
+    fresh: 'bool', screens: 'value', locale: 'value', lang: 'value', 'keep-downloads': 'bool',
   },
   list: {},
   report: {},
@@ -140,16 +145,16 @@ function writeReport(project, planId, walkId) {
     const prevMeta = store.readJson(path.join(store.walkDir(project, prevId), 'walk.json'));
     if (prevMeta) prev = { meta: prevMeta, events: store.readEvents(project, prevId) };
   }
-  const { markdown, counts } = report.build(meta, store.readEvents(project, walkId), prev);
+  const { markdown, counts, against } = report.build(meta, store.readEvents(project, walkId), prev);
   const file = path.join(dir, 'report.md');
   fs.writeFileSync(file, markdown);
-  return { file, markdown, counts, meta };
+  return { file, markdown, counts, against, meta };
 }
 
 async function main() {
   const { command, positional, flags } = parse(process.argv.slice(2));
   if (command === 'help' || flags.help) {
-    console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 13).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
+    console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 14).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
     return EXIT.ok;
   }
   const project = flags.project ? store.safeName(flags.project) : store.detectProject();
@@ -228,6 +233,27 @@ async function main() {
     return EXIT.ok;
   }
 
+  if (command === 'demo') {
+    if (positional.length) throw new UsageError('demo takes no plan: it walks the built-in demo plan.');
+    if (flags.lang && !LANGUAGES.includes(flags.lang)) throw new UsageError(`--lang must be one of: ${LANGUAGES.join(', ')}.`);
+    // The demo application and its plan speak the panel's language.
+    const lang = pickLanguage(flags.lang);
+    process.env.GUIDED_SMOKE_LANG = lang;
+    const demoProject = flags.project ? project : 'guided-smoke-demo';
+    const planPath = path.join(__dirname, '..', 'examples', 'demo', 'steps.js');
+    // A pointer in the data folder, so that list and report find the demo plan like any other.
+    const pointer = store.planFile(demoProject, 'demo');
+    fs.mkdirSync(path.dirname(pointer), { recursive: true });
+    fs.writeFileSync(pointer, `module.exports = require(${JSON.stringify(planPath)});\n`);
+    const server = require('../examples/demo/server');
+    const app = await server.start({ lang });
+    try {
+      return await runWalk({ project: demoProject, planId: 'demo', planPath, flags: { ...flags, base: app.url, lang } });
+    } finally {
+      await app.close();
+    }
+  }
+
   // ---- run ----
   const ref = positional[0];
   if (!ref) throw new UsageError('run needs a plan, walk, work item or steps file.');
@@ -254,8 +280,11 @@ async function main() {
     planId = r.planId;
     sourceWalk = r.walkId;
   }
+  return runWalk({ project, planId, planPath: store.planFile(project, planId), flags, sourceWalk });
+}
 
-  const planPath = store.planFile(project, planId);
+/** One walk of a plan: checks the flags, opens the browser, writes the report. */
+async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) {
   const plan = loadPlan(planPath);
   const total = plan.steps.length;
 
@@ -318,7 +347,7 @@ async function main() {
   }
   const r = writeReport(project, planId, walkId);
   console.log(`report: ${r.file}`);
-  console.log(`result: ${r.meta.result} · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}`);
+  console.log(`result: ${r.meta.result} · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}${r.against.length ? ` · ⚠ passed over a failed check: ${r.against.join(', ')}` : ''}`);
   return EXIT.ok;
 }
 

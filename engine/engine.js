@@ -52,7 +52,7 @@ function drawPanel(s) {
     body.appendChild(el('div', (s.auto.ok ? s.t.autoOk : s.t.autoFail) + s.auto.text,
       { marginTop: '8px', fontWeight: '600', color: s.auto.ok ? '#198754' : '#dc3545' }));
   }
-  if (s.warn) body.appendChild(el('div', s.warn, { marginTop: '8px', fontWeight: '600', color: '#b35c00' }));
+  (s.warnings || []).forEach(w => body.appendChild(el('div', w, { marginTop: '8px', fontWeight: '600', color: '#b35c00' })));
   const note = el('textarea', null, { display: 'none', width: '100%', marginTop: '8px', minHeight: '60px', boxSizing: 'border-box' });
   note.placeholder = s.t.notePlaceholder;
   body.appendChild(note);
@@ -66,7 +66,15 @@ function drawPanel(s) {
     const btn = el('button', b.label, {
       background: b.color, color: '#fff', border: '0', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer', fontWeight: '600',
     });
+    btn.setAttribute('data-guided-smoke-answer', b.value);
     btn.onclick = () => {
+      // ✔ on a failed automatic check takes a second click: a quick click must not pass over a red line unseen.
+      if (b.confirm && !btn.hasAttribute('data-guided-smoke-confirm')) {
+        btn.setAttribute('data-guided-smoke-confirm', '');
+        btn.textContent = b.confirm;
+        btn.style.background = '#fd7e14';
+        return;
+      }
       if (b.needsNote && note.style.display === 'none') {
         note.style.display = 'block';
         note.focus();
@@ -99,17 +107,167 @@ function drawPanel(s) {
   document.body.appendChild(box);
 }
 
-// Runs in the page. Index of the first element a person can actually see: Playwright's own "visible" accepts
-// screen-reader-only elements (1×1 px, clipped), which layouts often place before the real heading.
-function firstSeenIndex(elements) {
-  return elements.findIndex(e => {
-    const r = e.getBoundingClientRect();
-    if (r.width < 4 || r.height < 4) return false;
-    const s = getComputedStyle(e);
-    if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return false;
-    if (/^rect\(0(px)?,?\s*0(px)?,?\s*0(px)?,?\s*0(px)?\)$/.test(s.clip) || s.clipPath === 'inset(50%)') return false;
-    return true;
+// Runs in the page. Draws the box where the user types values a step needs (an account, a secret); null removes it.
+// The values stay in the page: the engine never reads them back, inPage() masks them in whatever it returns.
+// While a step waits for the box (s.waiting) it is outlined in orange and shows a button that sends nothing: it only
+// tells the engine the box is filled in.
+function drawBox(s) {
+  const old = document.getElementById('__guided_smoke_box');
+  if (old) old.remove();
+  if (!s) return;
+  const el = (tag, text, style) => {
+    const e = document.createElement(tag);
+    if (text) e.textContent = text;
+    if (style) Object.assign(e.style, style);
+    return e;
+  };
+  const box = el('div', null, {
+    position: 'fixed', left: '16px', bottom: '16px', width: '340px', maxHeight: '75vh', overflow: 'auto',
+    zIndex: '2147483646', background: '#fff', border: '1px solid #ced4da', borderLeft: '6px solid #0d6efd',
+    borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,.25)', font: '13px/1.4 "Segoe UI", system-ui, sans-serif',
+    color: '#212529', padding: '10px 12px', textAlign: 'left',
   });
+  box.id = '__guided_smoke_box';
+  box.appendChild(el('div', s.title, { fontWeight: '600', fontSize: '14px', marginBottom: '4px' }));
+  const inputs = {};
+  const use = el('button', s.useLabel, {
+    display: 'none', marginTop: '8px', background: '#198754', color: '#fff', border: '0', borderRadius: '6px',
+    padding: '6px 10px', cursor: 'pointer', fontWeight: '600',
+  });
+  use.setAttribute('data-guided-smoke-use', '');
+  s.fields.forEach(f => {
+    const label = el('label', f.label, { display: 'block', fontSize: '12px', marginTop: '6px' });
+    const input = el('input', null, {
+      display: 'block', width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '4px 6px',
+      border: '1px solid #ced4da', borderRadius: '4px', font: 'inherit', color: '#212529', background: '#fff',
+    });
+    input.type = f.secret ? 'password' : f.type;
+    input.autocomplete = f.secret ? 'new-password' : 'off';
+    input.spellcheck = false;
+    input.setAttribute('data-guided-smoke-field', f.name);
+    input.onkeydown = e => { if (e.key === 'Enter' && use.style.display !== 'none') use.click(); };
+    inputs[f.name] = input;
+    label.appendChild(input);
+    box.appendChild(label);
+  });
+  box.appendChild(use);
+  box.appendChild(el('div', s.note, { fontSize: '11px', color: '#6c757d', marginTop: '6px' }));
+  const out = el('pre', s.idle, {
+    whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '30vh', overflow: 'auto', background: '#f8f9fa',
+    border: '1px solid #e9ecef', borderRadius: '4px', padding: '6px', margin: '6px 0 0', font: '12px/1.4 Consolas, monospace',
+  });
+  out.setAttribute('data-guided-smoke-result', '');
+  box.appendChild(out);
+  use.onclick = () => {
+    const empty = s.fields.filter(f => !f.optional && !inputs[f.name].value);
+    s.fields.forEach(f => { inputs[f.name].style.borderColor = empty.includes(f) ? '#dc3545' : '#ced4da'; });
+    if (empty.length) { out.textContent = s.emptyText + empty.map(f => f.label).join(', '); return; }
+    window.__guidedSmokeBoxReady();
+  };
+  document.body.appendChild(box);
+  waiting(!!s.waiting);
+
+  function waiting(on) {
+    box.style.borderLeftColor = on ? '#fd7e14' : '#0d6efd';
+    box.style.outline = on ? '3px solid #fd7e14' : '';
+    use.style.display = on ? '' : 'none';
+    const first = on && s.fields.find(f => !inputs[f.name].value);
+    if (first) inputs[first.name].focus();
+  }
+  box.__guidedSmokeWaiting = waiting;
+}
+
+// Runs in the page. Switches the drawn box in or out of waiting without redrawing it, so what was typed stays.
+function setBoxWaiting(on) {
+  const box = document.getElementById('__guided_smoke_box');
+  if (box && box.__guidedSmokeWaiting) box.__guidedSmokeWaiting(on);
+}
+
+// Runs in the page. Labels of the box's required fields that are still empty; none when there is no box.
+function emptyFields(required) {
+  const box = document.getElementById('__guided_smoke_box');
+  if (!box) return [];
+  return required.filter(f => {
+    const input = box.querySelector(`[data-guided-smoke-field="${f.name}"]`);
+    return !input || !input.value;
+  }).map(f => f.label);
+}
+
+/**
+ * Replaces every occurrence of the given values (as typed, JSON-escaped and URL-encoded) in the strings and keys of a
+ * JSON-like value with "•••". Runs in the page before a result leaves it; values shorter than 3 characters are ignored.
+ * A safety net for honest plans, not a guarantee: a plan is code and could transform a value before returning it.
+ */
+function redact(value, secrets) {
+  const forms = [];
+  for (const s of secrets || []) {
+    if (typeof s !== 'string' || s.length < 3) continue;
+    forms.push(s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s));
+  }
+  const list = [...new Set(forms)].sort((a, b) => b.length - a.length);
+  const clean = v => {
+    if (typeof v === 'string') return list.reduce((acc, x) => acc.split(x).join('•••'), v);
+    if (Array.isArray(v)) return v.map(clean);
+    if (v && typeof v === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(v))) {
+      const o = {};
+      for (const [k, x] of Object.entries(v)) o[clean(k)] = clean(x);
+      return o;
+    }
+    return v;
+  };
+  return clean(value);
+}
+
+// Runs in the page (composed into one expression by inPage): reads the box, calls the plan's function, masks the box's
+// values in its result or error, and shows the masked result in the box. Only the masked value leaves the page.
+async function boxRun(fn, arg, o, mask) {
+  const box = document.getElementById('__guided_smoke_box');
+  const fields = {};
+  if (box) box.querySelectorAll('[data-guided-smoke-field]').forEach(i => { fields[i.getAttribute('data-guided-smoke-field')] = i.value; });
+  const secrets = Object.values(fields);
+  const show = text => { const out = box && box.querySelector('[data-guided-smoke-result]'); if (out) out.textContent = text; };
+  if (o.boxed && !box) return { error: o.noBox };
+  const empty = o.required.filter(f => !fields[f.name]).map(f => f.label);
+  if (empty.length) { const error = o.emptyText + empty.join(', '); show(error); return { error }; }
+  try {
+    const result = mask(await fn({ fields, arg }), secrets);
+    if (box && result !== undefined) show(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
+    return { result };
+  } catch (e) {
+    const error = mask(String((e && e.message) || e), secrets);
+    show(error);
+    return { error };
+  }
+}
+
+// Runs in the page. Indexes of the elements a person can actually see: Playwright's own "visible" accepts
+// screen-reader-only elements (1×1 px, clipped), which layouts often place before the real heading.
+function seenIndices(elements) {
+  const seen = [];
+  elements.forEach((e, i) => {
+    const r = e.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) return;
+    const s = getComputedStyle(e);
+    if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return;
+    if (/^rect\(0(px)?,?\s*0(px)?,?\s*0(px)?,?\s*0(px)?\)$/.test(s.clip) || s.clipPath === 'inset(50%)') return;
+    seen.push(i);
+  });
+  return seen;
+}
+
+/** Calls fn until until(value) holds or the time is up, waiting `interval` ms between calls; returns the last value. */
+async function poll(fn, { until = v => !!v, timeout = 30000, interval = 1000 } = {}, wait = ms => new Promise(r => setTimeout(r, ms))) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const value = await fn();
+    if (until(value) || Date.now() + interval > deadline) return value;
+    await wait(interval);
+  }
+}
+
+/** inPage takes an arrow function or a function expression; a method's source (`run() {}`) is not an expression. */
+function isFunctionExpression(source) {
+  return /^(async\s+)?(function\b|\(|[A-Za-z_$][\w$]*\s*=>)/.test(String(source).trim());
 }
 
 /**
@@ -140,6 +298,12 @@ function disablePasswordSaving(profile) {
   prefs.profile = { ...(prefs.profile || {}), password_manager_enabled: false, password_manager_leak_detection: false };
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(prefs));
+}
+
+// The heading above `expect`: it mentions the orange outline only when the step drew one. A step that checks the
+// database or waits for a job has nothing on screen to outline.
+function expectLabel(t, marked) {
+  return marked ? t.expect : t.expectPlain;
 }
 
 function normalizeCheck(result, t) {
@@ -180,7 +344,7 @@ async function walk(o) {
   const metaFile = path.join(walkDir, 'walk.json');
   const screensDir = path.join(walkDir, 'screens');
   const downloadsDir = path.join(walkDir, 'downloads');
-  const counts = { pass: 0, diff: 0, skip: 0 };
+  const counts = { pass: 0, diff: 0, skip: 0, against: 0 };
 
   const meta = {
     walkId, planId, project, title: plan.title || planId, workItem: options.workItem || plan.workItem || null,
@@ -197,6 +361,7 @@ async function walk(o) {
     fs.appendFileSync(eventsFile, JSON.stringify({ at: new Date().toISOString(), ...event }) + '\n');
     if (event.answer === 'pass' || event.answer === 'diff') counts[event.answer]++;
     if (event.answer === 'skip') counts.skip++;
+    if (event.againstCheck) counts.against++;
     console.log(`[${event.n}] ${event.answer}${event.reason ? ' (' + event.reason + ')' : ''}${event.note ? ' — ' + event.note : ''}`);
   };
 
@@ -230,17 +395,27 @@ async function walk(o) {
   context.on('close', onClosed);
   page.on('close', onClosed);
 
+  // The panel and the value box stay out of screenshots.
+  const ownUi = visibility => page.evaluate(v => ['__guided_smoke', '__guided_smoke_box'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) e.style.visibility = v;
+  }), visibility).catch(() => {});
   const takeShot = async (n, suffix = '') => {
     fs.mkdirSync(screensDir, { recursive: true });
     const file = path.join(screensDir, `${String(n).padStart(2, '0')}${suffix}.png`);
-    await page.evaluate(() => { const p = document.getElementById('__guided_smoke'); if (p) p.style.visibility = 'hidden'; }).catch(() => {});
+    await ownUi('hidden');
     await page.screenshot({ path: file, fullPage: false });
-    await page.evaluate(() => { const p = document.getElementById('__guided_smoke'); if (p) p.style.visibility = ''; }).catch(() => {});
+    await ownUi('');
     return path.relative(walkDir, file).split(path.sep).join('/');
   };
 
   await context.exposeFunction('__guidedSmokeAnswer', (a, note) => {
     if (pending) { const r = pending; pending = null; r({ a, note }); }
+  });
+  // The value box's button: the user has filled it in. Nothing travels with the call.
+  let boxReady = null;
+  await context.exposeFunction('__guidedSmokeBoxReady', () => {
+    if (boxReady) { const r = boxReady; boxReady = null; r({ a: 'box' }); }
   });
   let lastShot = null;
   await context.exposeFunction('__guidedSmokeShot', async () => {
@@ -248,8 +423,12 @@ async function walk(o) {
     try { lastShot = await takeShot(shotIndex); return true; } catch { return false; }
   });
 
-  // A navigation while a panel is open would wipe it; draw it again.
-  page.on('load', async () => { if (current) { try { await page.evaluate(drawPanel, current); } catch { /* page still loading */ } } });
+  // A navigation wipes the panel and the value box; draw them again. The box comes back empty: its values are gone.
+  let box = null;
+  page.on('load', async () => {
+    if (box) { try { await page.evaluate(drawBox, box); } catch { /* page still loading */ } }
+    if (current) { try { await page.evaluate(drawPanel, current); } catch { /* page still loading */ } }
+  });
 
   const draw = async panel => {
     for (let i = 0; i < 5; i++) {
@@ -273,10 +452,17 @@ async function walk(o) {
     return { ...res, seconds: Math.round((Date.now() - shownAt) / 1000) };
   };
 
+  // Plan doubts found while a step runs (nothing to outline, several matches); shown in its panel and recorded.
+  // `marked` says whether the step outlined anything, so the panel only points at an orange outline that exists.
+  let markMissing = false;
+  let marked = false;
+  let warnings = [];
+  const warn = text => { if (!warnings.includes(text)) warnings.push(text); };
+
   // Outlines the first match a person can see: layouts often hold hidden twins (screen-reader headings, templates)
   // earlier in the page. A tall element is brought in by its top edge, clear of a fixed header; a short one is centred.
-  // When nothing seen matches within 3 s, the panel says so instead of silently showing no outline.
-  let markMissing = false;
+  // When nothing seen matches within 3 s, the panel says so instead of silently showing no outline; when several do,
+  // it says that only the first is outlined.
   const mark = async locator => {
     try {
       const deadline = Date.now() + 3000;
@@ -284,8 +470,12 @@ async function walk(o) {
       let target = null;
       while (!target && Date.now() < deadline) {
         for (const candidate of wide ? [locator, wide] : [locator]) {
-          const index = await candidate.evaluateAll(firstSeenIndex).catch(() => -1);
-          if (index >= 0) { target = candidate.nth(index); break; }
+          const seen = await candidate.evaluateAll(seenIndices).catch(() => []);
+          if (seen.length) {
+            target = candidate.nth(seen[0]);
+            if (seen.length > 1) warn(format(t.manyMark, { count: seen.length }));
+            break;
+          }
         }
         if (!target) await page.waitForTimeout(200);
       }
@@ -298,11 +488,92 @@ async function walk(o) {
         e.style.outline = '4px solid #f59f00';
         e.style.outlineOffset = '3px';
       });
+      marked = true;
       return true;
     } catch {
       markMissing = true;
+      warn(t.markMissing);
       return false;
     }
+  };
+
+  // Text of the first match a person can see (the one mark() would outline), else of the first match. Several seen
+  // matches with different texts make an automatic check unreliable: the panel says so.
+  const squash = s => (s || '').replace(/\s+/g, ' ').trim();
+  const text = async locator => {
+    await locator.first().waitFor({ state: 'attached', timeout: 5000 });
+    const seen = await locator.evaluateAll(seenIndices).catch(() => []);
+    if (seen.length > 1) {
+      const all = await locator.evaluateAll((els, idx) => idx.map(i => els[i].textContent), seen).catch(() => []);
+      const distinct = new Set(all.map(squash));
+      if (distinct.size > 1) warn(format(t.manyText, { count: seen.length }));
+    }
+    return squash(await (seen.length ? locator.nth(seen[0]) : locator.first()).textContent({ timeout: 5000 }));
+  };
+
+  const secretBox = async spec => {
+    if (spec == null || spec === false) {
+      box = null;
+      await page.evaluate(drawBox, null).catch(() => {});
+      return;
+    }
+    const fields = Array.isArray(spec.fields) ? spec.fields : [];
+    const names = fields.map(f => f && f.name);
+    if (!fields.length || fields.some(f => !f || !/^[A-Za-z_][\w-]*$/.test(String(f.name || '')) || !f.label) || new Set(names).size !== names.length) {
+      throw new Error('secretBox needs fields: [{ name, label, secret?, optional? }] with unique names.');
+    }
+    box = {
+      title: String(spec.title || t.boxTitle), note: t.boxNote, idle: t.boxIdle, useLabel: t.boxUse, emptyText: t.boxEmpty, waiting: false,
+      fields: fields.map(f => ({ name: f.name, label: String(f.label), secret: !!f.secret, type: f.type === 'email' ? 'email' : 'text', optional: !!f.optional })),
+    };
+    await page.evaluate(drawBox, box);
+  };
+
+  // A step that needs the box while it is still empty waits for the user instead of failing: the user may have moved
+  // on before typing, or a page load emptied the box. The panel then offers only Stop; the box's button goes on.
+  let stopRequested = null;
+  const waitForBox = async empty => {
+    const panel = {
+      header: format(t.step, { n: currentStep.n, total }), accent: COLORS.warn, t, didLabel: t.did, expectLabel: t.todo,
+      title: currentStep.title, did: t.boxWaitDid, expect: [format(t.boxWaitTodo, { fields: empty.join(', '), use: t.boxUse })],
+      shot: false, buttons: [{ label: t.stop, value: 'stop', color: COLORS.stop }],
+    };
+    const answered = new Promise(resolve => { pending = resolve; boxReady = resolve; });
+    current = panel;
+    box.waiting = true;
+    await page.evaluate(setBoxWaiting, true).catch(() => {});
+    await draw(panel);
+    const res = closed ? { a: 'stop', note: 'browser closed' } : await answered;
+    pending = null;
+    boxReady = null;
+    current = null;
+    if (box) box.waiting = false;
+    await page.evaluate(() => { const p = document.getElementById('__guided_smoke'); if (p) p.remove(); }).catch(() => {});
+    await page.evaluate(setBoxWaiting, false).catch(() => {});
+    if (res.a === 'stop') {
+      stopRequested = res;
+      throw new Error('stopped while waiting for the value box');
+    }
+  };
+
+  const inPage = async (fn, arg = null) => {
+    if (typeof fn !== 'function' || !isFunctionExpression(fn.toString())) {
+      throw new Error('inPage needs an arrow function or a function expression: inPage(async ({ fields, arg }) => { … }, arg).');
+    }
+    if (stopRequested) throw new Error('stopped while waiting for the value box');
+    const o = {
+      boxed: !!box, noBox: t.boxGone, emptyText: t.boxEmpty,
+      required: box ? box.fields.filter(f => !f.optional).map(f => ({ name: f.name, label: f.label })) : [],
+    };
+    if (box) {
+      for (let empty = await page.evaluate(emptyFields, o.required); empty.length; empty = await page.evaluate(emptyFields, o.required)) {
+        await waitForBox(empty);
+      }
+    }
+    // One expression, not a function plus argument: the plan's function travels as source and runs inside the page.
+    const out = await page.evaluate(`(${boxRun})(${fn}, ${JSON.stringify(arg)}, ${JSON.stringify(o)}, ${redact})`);
+    if (out && out.error) throw new Error(out.error);
+    return out ? out.result : undefined;
   };
 
   const ctx = {
@@ -310,7 +581,13 @@ async function walk(o) {
     url: p => new URL(p, base).toString(),
     goto: async p => { await page.goto(new URL(p, base).toString()); await page.waitForLoadState('load'); },
     mark,
-    text: async locator => ((await locator.first().textContent({ timeout: 5000 })) || '').replace(/\s+/g, ' ').trim(),
+    text,
+    secretBox,
+    inPage,
+    poll: (fn, opts) => poll(fn, opts, async ms => {
+      if (closed) throw new Error('browser closed');
+      await new Promise(r => setTimeout(r, ms));
+    }),
     visible: async locator => locator.first().isVisible(),
     count: async locator => locator.count(),
     submit: async locator => {
@@ -331,6 +608,7 @@ async function walk(o) {
   };
 
   let stopped = false;
+  let currentStep = null;
   try {
     // ---- sign-in: always the user's; the script only waits until the browser leaves the sign-in pages ----
     const start = plan.start || '/';
@@ -369,6 +647,8 @@ async function walk(o) {
       shotIndex = n;
       lastShot = null;
       markMissing = false;
+      marked = false;
+      warnings = [];
 
       if (s.approve) {
         const what = typeof s.approve === 'string' ? s.approve : s.approve.what;
@@ -395,28 +675,37 @@ async function walk(o) {
         }
       }
 
+      currentStep = { n, title: s.title };
+      stopRequested = null;
       let runError = null;
       try { await s.run(ctx); } catch (e) { runError = e; }
       let auto = null;
       if (runError) auto = { ok: false, text: firstLine(runError) };
-      else if (s.check) {
+      else if (s.check && !stopRequested) {
         try { auto = normalizeCheck(await s.check(ctx), t); } catch (e) { auto = { ok: false, text: firstLine(e) }; }
+      }
+      // Stop pressed while the step waited for the box: checked here too, in case the plan caught the error itself.
+      if (stopRequested) {
+        record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: 'stop', note: stopRequested.note || undefined });
+        stopped = true;
+        break;
       }
       if (options.screens === 'all') { try { lastShot = await takeShot(n); } catch { /* keep going */ } }
 
       const res = await ask(panelFor(n, s, {
         auto,
-        warn: markMissing ? t.markMissing : null,
+        warnings,
+        expectLabel: expectLabel(t, marked),
         buttons: [
-          { label: t.pass, value: 'pass', color: COLORS.pass },
+          { label: t.pass, value: 'pass', color: COLORS.pass, confirm: auto && !auto.ok ? t.passConfirm : undefined },
           { label: t.diff, value: 'diff', color: COLORS.diff, needsNote: true },
           { label: t.stop, value: 'stop', color: COLORS.stop },
         ],
       }));
       if (res.a === 'diff' && options.screens === 'diff' && !lastShot) { try { lastShot = await takeShot(n); } catch { /* keep going */ } }
       record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: res.a, note: res.note || undefined,
-        auto: auto || undefined, error: runError ? firstLine(runError) : undefined, markMissing: markMissing || undefined,
-        seconds: res.seconds, screenshot: lastShot || undefined });
+        auto: auto || undefined, againstCheck: (res.a === 'pass' && auto && !auto.ok) || undefined, error: runError ? firstLine(runError) : undefined, markMissing: markMissing || undefined,
+        warnings: warnings.length ? warnings : undefined, seconds: res.seconds, screenshot: lastShot || undefined });
       if (res.a === 'stop') { stopped = true; break; }
     }
     shotIndex = null;
@@ -429,7 +718,8 @@ async function walk(o) {
     // ---- closing screen ----
     const closing = closed ? { a: 'close' } : await ask({
       header: format(t.step, { n: total, total }), accent: COLORS.info, t, didLabel: t.did, expectLabel: t.outcome,
-      title: t.doneTitle, did: t.doneDid, expect: [format(t.doneSummary, counts)], shot: false,
+      title: t.doneTitle, did: t.doneDid, shot: false,
+      expect: [format(t.doneSummary, counts), ...(counts.against ? [format(t.doneAgainst, counts)] : [])],
       buttons: [
         { label: t.close, value: 'close', color: COLORS.info },
         ...(options.fresh ? [] : [{ label: t.signOut, value: 'signout', color: COLORS.stop }]),
@@ -450,4 +740,4 @@ async function walk(o) {
   }
 }
 
-module.exports = { walk, isLocal, normalizeCheck, drawPanel, firstSeenIndex, widen, PACE };
+module.exports = { walk, isLocal, normalizeCheck, expectLabel, drawPanel, drawBox, emptyFields, seenIndices, redact, poll, isFunctionExpression, widen, PACE };

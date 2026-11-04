@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+- **Demo.** `node engine/run.js demo` (or `/guided-smoke demo`) starts a small orders application on 127.0.0.1 and
+  walks a 14-step plan against it, in the panel's language (English or Turkish): sign-in, a form, a validation the
+  browser blocks, a download, the application's dialog, two permitted steps, a background job waited for with
+  `poll`, and API calls through the value box. The data lives in memory only. `examples/demo/steps.js` replaces
+  `examples/example.steps.js` as the example of every kind of step.
+- `engine/test/demo.test.js` walks the demo headless in both languages, with a harness in the user's place; it is
+  skipped when playwright-core or a browser is missing. `examples/demo/screenshots.js` regenerates the README
+  screenshots in `docs/` (English only; both READMEs use them).
+- **Value box for API calls.** `secretBox({ title, fields })` draws a box at the bottom left of the page where the user
+  types an account a step needs; `inPage(fn, arg)` runs `fn({ fields, arg })` inside the page. Before a result or an
+  error leaves the page, every value from the box is masked as `•••`; the masked result is shown in the box. A page
+  load clears the box. Screenshots leave it out.
+- **A step waits for an empty value box.** When the user moves on before typing (or a page load emptied the box),
+  `inPage` waits instead of failing: the box is outlined in orange with a **✔ Use these values** button, the panel offers only
+  **■ Stop**, and the step goes on once the box is filled in.
+- **✔ over a failed automatic check takes a second click.** The button turns orange and asks again; the step is
+  recorded as passed with `againstCheck`, and the report flags it in the summary, the note column and the paste block,
+  as does the closing panel and the `result:` line.
+- **`poll(fn, { until, timeout, interval })`** waits for an effect (a background job, a row count) and returns the
+  last value.
+- **Several matches are flagged.** `text()` reads the first match a person can see, the same element `mark()`
+  outlines. When several visible elements match, the panel warns (for `text()`, only if their texts differ). The
+  warnings are recorded and appear in the report's note column, and so does "nothing to outline".
+- `references/patterns.md`: calling an API with the user's account, using the project's database tool, triggering a
+  background job and waiting for it.
+- The template marks `h1` instead of `h1, h2`.
+- **The panel points at an orange outline only when there is one.** A step that outlined nothing (a database check,
+  a job waited for) heads its expectations "What to expect" / "Beklenen sonuç" instead of "What you should see
+  (outlined in orange)".
+
 ## 0.1.2 — 2026-11-03
 
 - `mark(locator.first())` still outlined nothing when the first match was the hidden twin: `.first()` narrows the

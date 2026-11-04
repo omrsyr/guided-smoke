@@ -11,7 +11,7 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-test-'));
 process.env.GUIDED_SMOKE_HOME = home;
 const store = require('../store');
 const report = require('../report');
-const { isLocal, normalizeCheck } = require('../engine');
+const { isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
 const RUN = path.join(__dirname, '..', 'run.js');
 const P = 'demo';
 
@@ -82,11 +82,70 @@ test('the default browser locale is the system one, normalised', () => {
   assert.strictEqual(systemLocale(''), null);
 });
 
+test('the panel mentions the orange outline only when the step drew one', () => {
+  const { texts, LANGUAGES } = require('../i18n');
+  for (const lang of LANGUAGES) {
+    const t = texts(lang);
+    assert.strictEqual(expectLabel(t, true), t.expect);
+    assert.strictEqual(expectLabel(t, false), t.expectPlain);
+    assert.ok(t.expectPlain && t.expectPlain !== t.expect, `${lang}: a plain heading exists and differs`);
+  }
+});
+
 test('checks may return a boolean, [ok, text] or [ok, okText, failText]', () => {
   assert.deepStrictEqual(normalizeCheck(true), { ok: true, text: '' });
   assert.deepStrictEqual(normalizeCheck([false, 'x']), { ok: false, text: 'x' });
   assert.deepStrictEqual(normalizeCheck([false, 'good', 'bad']), { ok: false, text: 'bad' });
   assert.deepStrictEqual(normalizeCheck({ ok: 1, text: 't' }), { ok: true, text: 't' });
+});
+
+test('values typed into the box are masked wherever they appear in a result', () => {
+  const secrets = ['user@example.com', 'pa"ss word'];
+  const out = redact({ ok: true, echo: 'Hello user@example.com', list: ['pa"ss word', 'x'], nested: { body: JSON.stringify({ p: 'pa"ss word' }) },
+    url: '/q?p=' + encodeURIComponent('pa"ss word'), ['user@example.com']: 1, n: 7 }, secrets);
+  const text = JSON.stringify(out);
+  assert.doesNotMatch(text, /user@example\.com|pa\\?"ss word|pa%22ss%20word/);
+  assert.strictEqual(out.echo, 'Hello •••');
+  assert.strictEqual(out.n, 7);
+  assert.strictEqual(redact('id 42', ['42']), 'id 42', 'values shorter than 3 characters are not masked');
+  assert.strictEqual(redact('abcd', []), 'abcd');
+});
+
+test('poll stops when the condition holds or the time is up and returns the last value', async () => {
+  let n = 0;
+  const waits = [];
+  const fake = async ms => { waits.push(ms); };
+  assert.strictEqual(await poll(async () => ++n, { until: v => v >= 3, interval: 50 }, fake), 3);
+  assert.deepStrictEqual(waits, [50, 50]);
+  n = 0;
+  assert.strictEqual(await poll(async () => ++n, { until: () => false, timeout: 0 }, fake), 1);
+});
+
+test('inPage accepts arrow functions and function expressions, not methods', () => {
+  assert.ok(isFunctionExpression(async ({ fields }) => fields));
+  assert.ok(isFunctionExpression(function named() {}));
+  assert.ok(isFunctionExpression('async x => x'));
+  assert.ok(!isFunctionExpression({ async run() {} }.run));
+});
+
+test('plan warnings recorded on a step appear in the report', () => {
+  const meta = { totalSteps: 1, titles: ['a'], lang: 'en', walkId: 'w-1', planId: 'w', readyAt: '2026-11-03T08:00:00Z',
+    endedAt: '2026-11-03T08:00:10Z', measuredSeconds: 10, result: 'completed', browser: 'chrome', browserSource: 'requested', base: 'http://localhost' };
+  const { markdown } = report.build(meta, [{ n: 1, title: 'a', answer: 'pass', warnings: ['⚠ 2 places match'] }], null);
+  assert.match(markdown, /\| 1 \| a \| ✔ passed \|  \| ⚠ 2 places match \|/);
+});
+
+test('a pass over a failed automatic check is flagged in the summary, the note and the paste block', () => {
+  const meta = { totalSteps: 2, titles: ['a', 'b'], lang: 'en', walkId: 'v-1', planId: 'v', readyAt: '2026-11-03T08:00:00Z',
+    endedAt: '2026-11-03T08:00:10Z', measuredSeconds: 10, result: 'completed', browser: 'chrome', browserSource: 'requested', base: 'http://localhost' };
+  const events = [{ n: 1, title: 'a', answer: 'pass', auto: { ok: false, text: 'Refused' }, againstCheck: true }, { n: 2, title: 'b', answer: 'pass' }];
+  const { markdown, against, counts } = report.build(meta, events, null);
+  assert.deepStrictEqual(against, [1]);
+  assert.strictEqual(counts.pass, 2, 'it still counts as passed: the user has the last word');
+  assert.match(markdown, /⚠ 1 passed although the automatic check failed: 1\./);
+  assert.match(markdown, /\| 1 \| a \| ✔ passed \| ✖ Refused \| ⚠ ✔ given although the automatic check failed \|/);
+  assert.match(markdown, /✔ a \(⚠ automatic check failed\)/);
+  assert.match(markdown, /\n✔ b\n/);
 });
 
 test('the report counts final answers, compares with the previous walk and carries a paste block', () => {
@@ -117,6 +176,14 @@ test('the CLI refuses unknown flags, bad values and mixed filters', () => {
   assert.strictEqual(cli('run', '6655', '--from', '2', '--only', '1').status, 2);
   assert.strictEqual(cli('run', '7001').status, 4);
   assert.strictEqual(cli('frobnicate').status, 2);
+});
+
+test('the demo refuses a plan, an address and bad values before a browser opens', () => {
+  assert.strictEqual(cli('demo', '6655').status, 2);
+  assert.strictEqual(cli('demo', '--base', 'https://example.com').status, 2);
+  assert.strictEqual(cli('demo', '--lang', 'de').status, 2);
+  assert.strictEqual(cli('demo', '--pace', 'warp').status, 2);
+  assert.match(cli('help').stdout, /run\.js demo/);
 });
 
 test('the CLI reports and lists without a browser', () => {

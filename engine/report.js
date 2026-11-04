@@ -9,6 +9,8 @@ const LABELS = {
     result: 'Result', filter: 'Filter', summary: 'Summary', steps: 'Steps', step: 'Step', outcome: 'Result', auto: 'Automatic check',
     note: 'Note', shot: 'Screenshot', compare: 'Compared with', noChange: 'No change in results.', paste: 'To paste into the work item',
     pasteTitle: 'Smoke ({date}, {pass}/{run}; guided-smoke {walk})', notRun: 'not run', results: { completed: 'completed', stopped: 'stopped by the user', error: 'ended with an error', running: 'still running or interrupted' },
+    against: '✔ given although the automatic check failed', againstSummary: '⚠ {count} passed although the automatic check failed: {steps}.',
+    againstShort: 'automatic check failed',
     pass: 'passed', diff: 'different', skip: 'skipped', none: 'not run', reasons: { filter: 'filter', 'follows-skip': 'follows a skipped step', declined: 'not allowed', 'skip-writes': '--skip-writes', remote: 'remote address' },
   },
   tr: {
@@ -17,6 +19,8 @@ const LABELS = {
     result: 'Sonuç', filter: 'Filtre', summary: 'Özet', steps: 'Adımlar', step: 'Adım', outcome: 'Sonuç', auto: 'Otomatik kontrol',
     note: 'Not', shot: 'Görüntü', compare: 'Önceki koşuyla fark', noChange: 'Sonuçlarda değişiklik yok.', paste: 'İş kaydına yapıştırmak için',
     pasteTitle: 'Smoke ({date}, {pass}/{run}; guided-smoke {walk})', notRun: 'koşulmadı', results: { completed: 'tamamlandı', stopped: 'kullanıcı durdurdu', error: 'hatayla bitti', running: 'sürüyor ya da yarıda kesildi' },
+    against: 'otomatik kontrol ✖ iken ✔ verildi', againstSummary: '⚠ {count} adım otomatik kontrol ✖ iken ✔ aldı: {steps}.',
+    againstShort: 'otomatik kontrol ✖',
     pass: 'geçti', diff: 'farklı', skip: 'atlandı', none: 'koşulmadı', reasons: { filter: 'filtre', 'follows-skip': 'atlanan adımı izliyor', declined: 'izin verilmedi', 'skip-writes': '--skip-writes', remote: 'uzak adres' },
   },
 };
@@ -71,6 +75,8 @@ function build(meta, events, prev) {
   const L = LABELS[lang];
   const states = finalStates(events);
   const c = counts(meta, states);
+  // Steps the user passed over a failed automatic check: allowed (the user has the last word), but never hidden.
+  const against = [...states.values()].filter(e => e.answer === 'pass' && e.againstCheck).map(e => e.n).sort((a, b) => a - b);
   const start = localTime(meta.readyAt || meta.startedAt);
   const end = localTime(meta.endedAt);
   const lines = [];
@@ -86,6 +92,7 @@ function build(meta, events, prev) {
   if (meta.filter) lines.push(`- **${L.filter}:** ${meta.filter}`);
   lines.push('', `## ${L.summary}`, '');
   lines.push(`${ICON.pass} ${c.pass} ${L.pass} · ${ICON.diff} ${c.diff} ${L.diff} · ${ICON.skip} ${c.skip} ${L.skip} · ${ICON.none} ${c.none} ${L.none}`);
+  if (against.length) lines.push('', L.againstSummary.replace('{count}', against.length).replace('{steps}', against.join(', ')));
 
   lines.push('', `## ${L.steps}`, '');
   lines.push(`| # | ${L.step} | ${L.outcome} | ${L.auto} | ${L.note} | ${L.shot} |`);
@@ -100,7 +107,7 @@ function build(meta, events, prev) {
       outcome = `${ICON.stop} ${L.notRun}`;
     }
     const auto = e && e.auto ? `${e.auto.ok ? '✔' : '✖'} ${e.auto.text}` : '';
-    const note = e ? [e.note, e.error].filter(Boolean).join(' · ') : '';
+    const note = e ? [e.answer === 'pass' && e.againstCheck ? `⚠ ${L.against}` : null, e.note, e.error, ...(e.warnings || [])].filter(Boolean).join(' · ') : '';
     const shot = e && e.screenshot ? `[${e.screenshot}](${e.screenshot})` : '';
     lines.push(`| ${n} | ${cell(title)} | ${cell(outcome)} | ${cell(auto)} | ${cell(note)} | ${shot} |`);
   }
@@ -126,12 +133,12 @@ function build(meta, events, prev) {
     const e = states.get(n);
     if (!e || e.answer === 'stop') continue;
     if (e.answer === 'skip' && e.reason === 'filter') continue;
-    lines.push(`${ICON[e.answer]} ${e.title}${e.note ? ` — ${e.note}` : ''}`);
+    lines.push(`${ICON[e.answer]} ${e.title}${e.answer === 'pass' && e.againstCheck ? ` (⚠ ${L.againstShort})` : ''}${e.note ? ` — ${e.note}` : ''}`);
   }
   lines.push(`${L.measured}: ${duration(meta.measuredSeconds, lang)}`);
   lines.push('```', '');
 
-  return { markdown: lines.join('\n'), counts: c };
+  return { markdown: lines.join('\n'), counts: c, against };
 }
 
 module.exports = { build, finalStates, counts, duration };
