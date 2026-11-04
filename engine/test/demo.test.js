@@ -117,3 +117,75 @@ test('Stop while a step waits for the value box stops the walk at that step', { 
     fs.rmSync(walkDir, { recursive: true, force: true });
   }
 });
+
+test('the panel moves into an open modal <dialog> and back to the page when it closes', { skip, timeout: 60000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const seen = {};
+  const plan = {
+    id: 'dialog', start: '/orders/1001', ready: '#order-card', login: '/login',
+    steps: [
+      { title: 'Dialog open', did: 'x', expect: ['x'], run: async ({ page, mark }) => {
+        await page.locator('#cancel').click();
+        await mark(page.locator('#cancel-dialog .modal-content'));
+      } },
+      { title: 'After', did: 'x', expect: ['x'], run: async () => {} },
+    ],
+  };
+  const parent = page => page.evaluate(() => document.getElementById('__guided_smoke').parentElement.tagName);
+  try {
+    const { meta } = await autoWalk({
+      playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn,
+      onPanel: async (page, { title }) => {
+        if (title !== 'Dialog open' || seen.inDialog) return;
+        seen.inDialog = await parent(page);
+        // The user closes the application's dialog while the panel waits: the panel must stay on screen and answerable.
+        await page.evaluate(() => document.getElementById('cancel-dialog').close());
+        await page.waitForTimeout(100);
+        seen.afterClose = await parent(page);
+      },
+    });
+    assert.strictEqual(meta.result, 'completed');
+    assert.deepStrictEqual(seen, { inDialog: 'DIALOG', afterClose: 'BODY' });
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+// widen() reads playwright-core's internal selector chain. If an upgrade changes it, this test fails instead of the
+// outline silently disappearing.
+test('mark(locator.first()) outlines the visible match when the first one is a hidden twin', { skip, timeout: 60000 }, async () => {
+  const { widen } = require('../engine');
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const plan = {
+    id: 'widen', start: '/orders/1001', ready: '#order-card', login: '/login',
+    steps: [{
+      title: 'Hidden twin', did: 'x', expect: ['x'],
+      run: async ({ page, mark, state }) => {
+        await page.evaluate(() => {
+          const twin = document.createElement('h1');
+          twin.textContent = 'screen-reader twin';
+          twin.style.cssText = 'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)';
+          document.body.prepend(twin);
+        });
+        state.widened = !!widen(page.locator('h1').first());
+        state.marked = await mark(page.locator('h1').first());
+      },
+      check: async ({ page, state }) => {
+        const outlined = await page.locator('[data-guided-smoke-mark]').allTextContents();
+        return [state.widened && state.marked && outlined.length === 1 && outlined[0].trim() === 'Order 1001', JSON.stringify({ ...state, outlined })];
+      },
+    }],
+  };
+  try {
+    await autoWalk({ playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn });
+    const [e] = readEvents(walkDir);
+    assert.ok(e.auto.ok, e.auto.text);
+    assert.ok(!e.warnings, JSON.stringify(e.warnings));
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});

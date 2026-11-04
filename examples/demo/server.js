@@ -63,16 +63,16 @@ button,.button{font:inherit;padding:6px 14px;border-radius:4px;border:1px solid 
 .actions{display:flex;gap:8px;margin-top:8px}
 table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:14px}
 .note{color:#065f46;font-weight:600;margin:8px 0 0}.muted{color:#6b7280;font-size:13px}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:1000}
-.modal[hidden]{display:none}.modal-content{background:#fff;border-radius:8px;padding:20px 24px;min-width:320px}
+#cancel-dialog{border:0;border-radius:8px;padding:0}#cancel-dialog::backdrop{background:rgba(0,0,0,.45)}
+.modal-content{background:#fff;padding:20px 24px;min-width:320px}
 .login{max-width:360px;margin:60px auto}.login input{width:100%;margin:2px 0 10px}
 `;
 
 const JS = `
 const dialog = document.getElementById('cancel-dialog');
 if (dialog) {
-  document.getElementById('cancel').addEventListener('click', () => { dialog.hidden = false; });
-  document.getElementById('cancel-no').addEventListener('click', () => { dialog.hidden = true; });
+  document.getElementById('cancel').addEventListener('click', () => dialog.showModal());
+  document.getElementById('cancel-no').addEventListener('click', () => dialog.close());
 }
 `;
 
@@ -113,11 +113,11 @@ function orderPage(T, lang, query) {
 </section>
 <section class="card" id="api-account"><h2>${esc(T.apiAccount)}</h2><p class="muted">${esc(T.apiHint)}</p></section>
 <section class="card" id="calls"><h2>${esc(T.calls)}</h2>${calls}</section>
-<div class="modal" id="cancel-dialog" role="dialog" aria-modal="true" hidden><div class="modal-content">
+<dialog id="cancel-dialog"><div class="modal-content">
   <p>${esc(T.confirm)}</p>
   <div class="actions"><button type="button" class="secondary" id="cancel-no">${esc(T.no)}</button>
   <form method="post" action="/orders/${ORDER}/cancel"><button type="submit" class="danger">${esc(T.yes)}</button></form></div>
-</div></div>`);
+</div></dialog>`);
 }
 
 function jobsPage(T, lang) {

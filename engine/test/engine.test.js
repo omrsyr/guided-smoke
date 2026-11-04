@@ -195,6 +195,29 @@ test('the CLI reports and lists without a browser', () => {
   assert.match(l.stdout, /6655-machine-expiry-2/);
 });
 
+test('run links a plan file instead of copying it and does not replace another plan without --force', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-file-'));
+  fs.writeFileSync(path.join(dir, 'texts.js'), "module.exports = { title: 'from a sibling file' };");
+  const file = path.join(dir, 'linked.steps.js');
+  fs.writeFileSync(file, "const T = require('./texts'); module.exports = { steps: [{ title: T.title, run: async () => {} }] };");
+  // No address anywhere: the walk is refused before a browser opens, after the plan is linked.
+  const r = cli('run', file);
+  assert.strictEqual(r.status, 2, r.stderr);
+  assert.match(r.stderr, /No address/);
+  const stored = store.planFile(P, 'linked');
+  assert.strictEqual(require(stored).steps[0].title, 'from a sibling file', 'the relative require still resolves');
+  assert.ok(fs.readFileSync(stored, 'utf8').includes(JSON.stringify(file)));
+
+  const other = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-file-')), 'linked.steps.js');
+  fs.writeFileSync(other, "module.exports = { steps: [{ title: 'other', run: async () => {} }] };");
+  const refused = cli('run', other);
+  assert.strictEqual(refused.status, 2);
+  assert.match(refused.stderr, /already exists.*--force/);
+  assert.ok(fs.readFileSync(stored, 'utf8').includes(JSON.stringify(file)), 'the first link is kept');
+  assert.match(cli('run', other, '--force').stderr, /No address/);
+  assert.ok(fs.readFileSync(stored, 'utf8').includes(JSON.stringify(other)));
+});
+
 test('init creates a plan from the template and refuses ids that read as walks', () => {
   const r = cli('init', '8000-new-screen', '--title', 'New screen', '--work-item', '8000');
   assert.strictEqual(r.status, 0, r.stderr);

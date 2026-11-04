@@ -1,5 +1,18 @@
 # Safety
 
+## A plan is code
+
+- A plan (`steps.js`) is a Node.js module. It runs with the user's own rights on this machine: it can read files,
+  start programs and reach the network, and so can every module it requires. The engine does not sandbox it.
+- Run only a plan written in this session or one the user has read. Never fetch a plan from elsewhere and run it
+  unread; the skill itself never downloads plans. `run <file.js>` links that file into the project's plans, so the
+  file stays the one copy to read and edit.
+- The rules below are guards for honest plans, not a sandbox. The remote-address rule looks at the walk's address
+  (`base`) and skips permitted steps there; what a permitted step changes is decided by its own code. Masking in the
+  value box is a safety net, not a guarantee.
+- The panel and the value box are part of the page under test, so the application's own scripts can see them. Type
+  into the box only an account meant for that application.
+
 ## Sign-in and secrets
 
 - The user signs in, always. The script waits until the browser leaves the sign-in pages. Never put a user name,

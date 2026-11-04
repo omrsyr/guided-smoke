@@ -70,10 +70,11 @@ All work goes through `node <skill-dir>/engine/run.js` (`<skill-dir>` is this fi
 node run.js doctor                    data folder, project, chosen browser, runtime — run this first
 node run.js setup                     install playwright-core once (asks npm; get the user's OK first)
 node run.js init <plan-id> [--title T] [--work-item N]   create plans/<plan-id>/steps.js from the template
-node run.js run <ref|file.js> [flags] run a walk (start it in the background and wait for it to finish)
+node run.js run <ref|file.js> [flags] run a walk (start it in the background and wait for it to finish); a file is
+                                      linked into the plans, --force replaces another plan with the same id
 node run.js demo [flags]              start the demo application and walk its plan (same flags as run, except
-                                      --base, --work-item, --allow-remote-writes); walks are kept under project
-                                      guided-smoke-demo (report demo --project guided-smoke-demo)
+                                      --base, --work-item, --allow-remote-writes, --force); walks are kept under
+                                      project guided-smoke-demo (report demo --project guided-smoke-demo)
 node run.js list | report <ref> | reset-login | paths
 ```
 

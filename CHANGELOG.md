@@ -20,6 +20,16 @@
 - **✔ over a failed automatic check takes a second click.** The button turns orange and asks again; the step is
   recorded as passed with `againstCheck`, and the report flags it in the summary, the note column and the paste block,
   as does the closing panel and the `result:` line.
+- **The panel works over the application's modal `<dialog>`.** `showModal()` makes the rest of the page inert, so the
+  panel and the value box could not be clicked and the walk stalled. While a modal dialog is open they now live inside
+  it, and they come back to the page when it closes; what was typed stays. The demo's cancel dialog is a native
+  `<dialog>` to keep this covered.
+- **`run <file.js>` links the file instead of copying it.** The plan's relative `require`s keep working, the file is
+  the one copy to edit, and the walk's `steps.snapshot.js` holds the plan itself, not the link. A different plan
+  already stored under the same id is replaced only with `--force`.
+- `references/safety.md` opens with "A plan is code": what a plan can do, which plans to run, and what the guards are
+  and are not.
+- A browser test fails if a playwright-core upgrade breaks how `mark(locator.first())` finds the visible match.
 - **`poll(fn, { until, timeout, interval })`** waits for an effect (a background job, a row count) and returns the
   last value.
 - **Several matches are flagged.** `text()` reads the first match a person can see, the same element `mark()`

@@ -5,7 +5,7 @@
 //   node run.js setup                                  install playwright-core into the data folder (once)
 //   node run.js doctor                                 data folder, project, browser, runtime
 //   node run.js init <plan-id> [--title T] [--work-item N] [--force]
-//   node run.js run <plan|walk|work-item|file.js> [flags]
+//   node run.js run <plan|walk|work-item|file.js> [flags] [--force]
 //   node run.js demo [flags]                           walk the demo plan against the built-in demo application
 //   node run.js list
 //   node run.js report <plan|walk|work-item>
@@ -35,7 +35,7 @@ const FLAGS = {
   run: {
     browser: 'value', base: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool',
     'skip-writes': 'bool', 'allow-remote-writes': 'bool', 'work-item': 'value', fresh: 'bool', screens: 'value',
-    locale: 'value', lang: 'value', 'keep-downloads': 'bool',
+    locale: 'value', lang: 'value', 'keep-downloads': 'bool', force: 'bool',
   },
   demo: {
     browser: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool', 'skip-writes': 'bool',
@@ -95,6 +95,22 @@ function setup() {
   const r = spawnSync(`npm install playwright-core@${PLAYWRIGHT_VERSION} --no-audit --no-fund`, { cwd: dir, stdio: 'inherit', shell: true });
   if (r.status !== 0) throw Object.assign(new Error('npm install failed.'), { exit: EXIT.runtime });
   console.log(`playwright-core ${PLAYWRIGHT_VERSION} installed in ${dir}`);
+}
+
+// A plan kept elsewhere (a file given to run, the demo) is linked into the project's plans by a one-line pointer, not
+// copied: its own relative requires keep working and there is one copy to edit.
+const POINTER = /^module\.exports = require\(("(?:[^"\\]|\\.)*")\);\s*$/;
+function pointerTo(file) {
+  return `module.exports = require(${JSON.stringify(file)});\n`;
+}
+
+/** The file a stored plan really is: the target of a pointer, else the plan file itself. */
+function planSource(planPath) {
+  const m = POINTER.exec(fs.readFileSync(planPath, 'utf8'));
+  if (!m) return planPath;
+  const target = JSON.parse(m[1]);
+  if (!fs.existsSync(target)) throw new UsageError(`${planPath} points at ${target}, which no longer exists. Run the file from its new place (run <file.js> --force).`);
+  return target;
 }
 
 function loadPlan(file) {
@@ -244,7 +260,7 @@ async function main() {
     // A pointer in the data folder, so that list and report find the demo plan like any other.
     const pointer = store.planFile(demoProject, 'demo');
     fs.mkdirSync(path.dirname(pointer), { recursive: true });
-    fs.writeFileSync(pointer, `module.exports = require(${JSON.stringify(planPath)});\n`);
+    fs.writeFileSync(pointer, pointerTo(planPath));
     const server = require('../examples/demo/server');
     const app = await server.start({ lang });
     try {
@@ -270,10 +286,15 @@ async function main() {
       : path.basename(file).replace(/(\.steps)?\.c?js$/i, '');
     planId = String(plan.id || fromName).toLowerCase();
     if (!store.PLAN_ID.test(planId)) throw new UsageError(`Cannot derive a plan id from ${file}; add id: '...' to the module.`);
+    // A different plan already stored under this id is replaced only with --force.
     const target = store.planFile(project, planId);
     if (path.resolve(target) !== file) {
+      const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
+      if (existing !== null && existing !== pointerTo(file) && !flags.force) {
+        throw new UsageError(`Plan ${planId} already exists in this project (${target}). Give the module another id, or use --force to replace it with a link to ${file}.`);
+      }
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.copyFileSync(file, target);
+      fs.writeFileSync(target, pointerTo(file));
     }
   } else {
     const r = store.resolve(project, ref);
@@ -285,7 +306,8 @@ async function main() {
 
 /** One walk of a plan: checks the flags, opens the browser, writes the report. */
 async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) {
-  const plan = loadPlan(planPath);
+  const source = planSource(planPath);
+  const plan = loadPlan(source);
   const total = plan.steps.length;
 
   const filters = ['from', 'only', 'retry-failed'].filter(f => flags[f]);
@@ -323,7 +345,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
   const walkId = store.nextWalkId(project, planId);
   const walkDir = store.walkDir(project, walkId);
   fs.mkdirSync(walkDir, { recursive: true });
-  fs.copyFileSync(planPath, path.join(walkDir, 'steps.snapshot.js'));
+  fs.copyFileSync(source, path.join(walkDir, 'steps.snapshot.js'));
   console.log(`walk ${walkId} · ${chosen.name} (${chosen.source}) · ${base}${filterNote ? ' · ' + filterNote : ''}`);
 
   const { walk } = require('./engine');

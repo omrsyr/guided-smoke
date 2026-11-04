@@ -14,6 +14,33 @@ const LOGIN_TIMEOUT_MS = 15 * 60 * 1000;
 
 const COLORS = { pass: '#198754', diff: '#dc3545', stop: '#6c757d', yes: '#198754', skip: '#fd7e14', info: '#0d6efd', warn: '#fd7e14' };
 
+// Runs in every page, before the page's own scripts. A modal <dialog> (showModal) makes everything outside it inert,
+// the panel and the box included, and a walk could not be answered. While one is open they live inside the topmost
+// modal dialog (the last open one in document order); when it closes or goes away they come back to the page. Moving
+// a node keeps its handlers and what was typed into it. A dialog styled with a transform shifts them with it.
+function installUiHost() {
+  if (window.__guidedSmokeUi) return;
+  const nodes = {};
+  const place = () => {
+    const modal = [...document.querySelectorAll('dialog[open]')].filter(d => d.matches(':modal')).pop();
+    const host = modal || document.body;
+    if (!host) return;
+    for (const node of Object.values(nodes)) if (node.parentNode !== host) host.appendChild(node);
+  };
+  window.__guidedSmokeUi = {
+    show(name, node) { nodes[name] = node; place(); },
+    hide(name) { delete nodes[name]; },
+  };
+  let queued = false;
+  const observer = new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => { queued = false; place(); });
+  });
+  const watch = () => observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['open'] });
+  if (document.documentElement) watch(); else document.addEventListener('DOMContentLoaded', watch, { once: true });
+}
+
 // Runs in the page. Draws the panel; every text goes in through textContent, never as HTML.
 function drawPanel(s) {
   const old = document.getElementById('__guided_smoke');
@@ -82,6 +109,7 @@ function drawPanel(s) {
         return;
       }
       clear();
+      if (window.__guidedSmokeUi) window.__guidedSmokeUi.hide('panel');
       box.remove();
       window.__guidedSmokeAnswer(b.value, note.value || '');
     };
@@ -104,7 +132,8 @@ function drawPanel(s) {
     body.style.display = hidden ? '' : 'none';
     min.textContent = hidden ? s.t.minimize : s.t.open;
   };
-  document.body.appendChild(box);
+  if (window.__guidedSmokeUi) window.__guidedSmokeUi.show('panel', box);
+  else document.body.appendChild(box);
 }
 
 // Runs in the page. Draws the box where the user types values a step needs (an account, a secret); null removes it.
@@ -114,7 +143,10 @@ function drawPanel(s) {
 function drawBox(s) {
   const old = document.getElementById('__guided_smoke_box');
   if (old) old.remove();
-  if (!s) return;
+  if (!s) {
+    if (window.__guidedSmokeUi) window.__guidedSmokeUi.hide('box');
+    return;
+  }
   const el = (tag, text, style) => {
     const e = document.createElement(tag);
     if (text) e.textContent = text;
@@ -164,7 +196,8 @@ function drawBox(s) {
     if (empty.length) { out.textContent = s.emptyText + empty.map(f => f.label).join(', '); return; }
     window.__guidedSmokeBoxReady();
   };
-  document.body.appendChild(box);
+  if (window.__guidedSmokeUi) window.__guidedSmokeUi.show('box', box);
+  else document.body.appendChild(box);
   waiting(!!s.waiting);
 
   function waiting(on) {
@@ -382,6 +415,8 @@ async function walk(o) {
     ...(options.locale ? { locale: options.locale } : {}),
   });
 
+  await context.addInitScript(installUiHost);
+
   let pending = null;
   let current = null;
   let shotIndex = null;
@@ -548,7 +583,11 @@ async function walk(o) {
     boxReady = null;
     current = null;
     if (box) box.waiting = false;
-    await page.evaluate(() => { const p = document.getElementById('__guided_smoke'); if (p) p.remove(); }).catch(() => {});
+    await page.evaluate(() => {
+      if (window.__guidedSmokeUi) window.__guidedSmokeUi.hide('panel');
+      const p = document.getElementById('__guided_smoke');
+      if (p) p.remove();
+    }).catch(() => {});
     await page.evaluate(setBoxWaiting, false).catch(() => {});
     if (res.a === 'stop') {
       stopRequested = res;
