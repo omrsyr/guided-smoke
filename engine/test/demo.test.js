@@ -189,3 +189,94 @@ test('mark(locator.first()) outlines the visible match when the first one is a h
     fs.rmSync(walkDir, { recursive: true, force: true });
   }
 });
+
+test('after Stop in the box wait, a plan that catches the error can neither call the application nor use a helper', { skip, timeout: 60000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const seen = {};
+  const plan = {
+    id: 'stop-guard', start: '/orders/1001', ready: '#order-card', login: '/login',
+    steps: [{ title: 'Swallows the stop', did: 'x', expect: ['x'], run: async ({ page, secretBox, inPage, goto }) => {
+      await secretBox({ fields: [{ name: 'token', label: 'Token', secret: true }] });
+      try { await inPage(async () => 1); } catch { /* an unwise plan carries on */ }
+      seen.fetch = await page.evaluate(() => fetch('/api/login', { method: 'POST', body: '{}' }).then(r => r.status, () => 'blocked'));
+      try { await goto('/jobs'); seen.goto = 'ran'; } catch { seen.goto = 'refused'; }
+    } }],
+  };
+  try {
+    const { meta } = await autoWalk({ playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn, boxLate: true, stopOnWait: true });
+    assert.strictEqual(meta.result, 'stopped');
+    assert.deepStrictEqual(seen, { fetch: 'blocked', goto: 'refused' });
+    assert.strictEqual(server.db.calls(), 0, 'no API call reached the application');
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+test('with nested modal dialogs the panel sits in the one on top, and its clicks never reach the page', { skip, timeout: 60000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const seen = {};
+  const plan = {
+    id: 'nested', start: '/orders/1001', ready: '#order-card', login: '/login',
+    steps: [
+      { title: 'Two dialogs', did: 'x', expect: ['x'], run: async ({ page }) => {
+        await page.evaluate(() => {
+          // In the markup "confirm" comes first, but it is opened second, from inside "edit": it is the one on top.
+          for (const id of ['confirm', 'edit']) {
+            const d = document.createElement('dialog');
+            d.id = id;
+            d.textContent = id;
+            document.body.appendChild(d);
+          }
+          window.__pageClicks = 0;
+          document.addEventListener('click', () => { window.__pageClicks++; });
+          document.getElementById('edit').showModal();
+          document.getElementById('confirm').showModal();
+        });
+      } },
+      { title: 'After', did: 'x', expect: ['x'], run: async () => {}, check: async ({ page }) => {
+        const clicks = await page.evaluate(() => window.__pageClicks);
+        return [clicks === 0, `page saw ${clicks} clicks`];
+      } },
+    ],
+  };
+  try {
+    const { meta } = await autoWalk({
+      playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn,
+      onPanel: async (page, { title }) => {
+        if (title === 'Two dialogs' && !seen.host) seen.host = await page.evaluate(() => document.getElementById('__guided_smoke').parentElement.id);
+      },
+    });
+    assert.strictEqual(meta.result, 'completed');
+    assert.strictEqual(seen.host, 'confirm');
+    const events = readEvents(walkDir);
+    assert.ok(events[1].auto.ok, events[1].auto.text);
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+test('a value box gone from the page is drawn again and waited for', { skip, timeout: 60000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const plan = {
+    id: 'box-gone', start: '/orders/1001', ready: '#order-card', login: '/login',
+    steps: [{ title: 'Box removed', did: 'x', expect: ['x'], run: async ({ page, secretBox, inPage, state }) => {
+      await secretBox({ fields: [{ name: 'token', label: 'Token', secret: true }] });
+      // What a client-side route change that wipes the page does, without the engine noticing.
+      await page.evaluate(() => { window.__guidedSmokeUi.hide('box'); document.getElementById('__guided_smoke_box').remove(); });
+      state.length = await inPage(async ({ fields }) => fields.token.length);
+    }, check: async ({ state }) => [state.length === 5, `length ${state.length}`] }],
+  };
+  try {
+    await autoWalk({ playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn, boxLate: true, box: { token: 'abcde' } });
+    const [e] = readEvents(walkDir);
+    assert.ok(e.auto.ok, e.auto.text);
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});

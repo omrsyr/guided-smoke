@@ -87,3 +87,8 @@ For an API that needs the user's account, the project's database tool, or a back
     positions (`nth`) unless the order is the thing being tested.
 14. **Values the user must give** (an account for an API call) go into `secretBox`, never into the plan, a constant,
     an environment variable or the chat. See [patterns](patterns.md#calling-an-api-with-the-users-account).
+15. **The application's own dialogs.** While a modal `<dialog>` is open, the panel and the value box move inside the
+    one on top, so they stay clickable; their clicks and keys stop there and never reach the page's handlers. A dialog
+    styled with `transform`, `filter` or `contain` carries them along: they are placed and clipped against it. If the
+    panel looks out of place inside such a dialog, mark the dialog's content and let the step close it with the next
+    action.

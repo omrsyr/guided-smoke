@@ -11,28 +11,51 @@ const { texts, format } = require('./i18n');
 const PACE = { slow: 400, normal: 200, fast: 60 };
 const DEFAULT_LOGIN = /(login|signin|sign-in|giris|auth|account\/)/i;
 const LOGIN_TIMEOUT_MS = 15 * 60 * 1000;
+const STOPPED = 'The walk was stopped.';
 
 const COLORS = { pass: '#198754', diff: '#dc3545', stop: '#6c757d', yes: '#198754', skip: '#fd7e14', info: '#0d6efd', warn: '#fd7e14' };
 
 // Runs in every page, before the page's own scripts. A modal <dialog> (showModal) makes everything outside it inert,
-// the panel and the box included, and a walk could not be answered. While one is open they live inside the topmost
-// modal dialog (the last open one in document order); when it closes or goes away they come back to the page. Moving
-// a node keeps its handlers and what was typed into it. A dialog styled with a transform shifts them with it.
+// the panel and the box included, and a walk could not be answered. While one is open they live inside the modal
+// dialog on top (the one opened last); when it closes or goes away they come back to the page. Moving a node keeps its
+// handlers and what was typed into it. Inside a dialog styled with a transform they move and clip with it.
+// Their events stop at their own edge, so the page's handlers (close on an outside click, focus traps) never see them.
 function installUiHost() {
   if (window.__guidedSmokeUi) return;
   const nodes = {};
+  const opened = [];
+  const isModal = d => d.isConnected && d.open && d.matches(':modal');
+  const topModal = () => {
+    for (let i = opened.length - 1; i >= 0; i--) {
+      if (isModal(opened[i])) return opened[i];
+      opened.splice(i, 1);
+    }
+    // Opened before the watch began: document order is the best guess left.
+    return [...document.querySelectorAll('dialog[open]')].filter(isModal).pop();
+  };
   const place = () => {
-    const modal = [...document.querySelectorAll('dialog[open]')].filter(d => d.matches(':modal')).pop();
-    const host = modal || document.body;
+    const host = topModal() || document.body;
     if (!host) return;
     for (const node of Object.values(nodes)) if (node.parentNode !== host) host.appendChild(node);
   };
+  const OWN = ['click', 'dblclick', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'keydown', 'keyup', 'keypress',
+    'input', 'focusin', 'focusout'];
   window.__guidedSmokeUi = {
-    show(name, node) { nodes[name] = node; place(); },
+    show(name, node) {
+      OWN.forEach(type => node.addEventListener(type, e => e.stopPropagation()));
+      nodes[name] = node;
+      place();
+    },
     hide(name) { delete nodes[name]; },
   };
   let queued = false;
-  const observer = new MutationObserver(() => {
+  const observer = new MutationObserver(records => {
+    for (const r of records) {
+      if (r.type !== 'attributes' || r.target.tagName !== 'DIALOG') continue;
+      const i = opened.indexOf(r.target);
+      if (i >= 0) opened.splice(i, 1);
+      if (r.target.open) opened.push(r.target);
+    }
     if (queued) return;
     queued = true;
     queueMicrotask(() => { queued = false; place(); });
@@ -227,26 +250,41 @@ function emptyFields(required) {
 }
 
 /**
- * Replaces every occurrence of the given values (as typed, JSON-escaped and URL-encoded) in the strings and keys of a
- * JSON-like value with "•••". Runs in the page before a result leaves it; values shorter than 3 characters are ignored.
- * A safety net for honest plans, not a guarantee: a plan is code and could transform a value before returning it.
+ * Replaces every occurrence of the given values in the strings, keys and numbers of a value with "•••": as typed,
+ * JSON-escaped, URL-encoded, form-encoded and base64, and every pair as base64 "a:b" (Basic authentication). Anything
+ * that is not plain data (an Error, a URL, a Map, a class instance) is turned into plain data first, so nothing
+ * travels with contents that were not looked at. Runs in the page before a result leaves it; values shorter than
+ * 3 characters are ignored. A safety net for honest plans, not a guarantee: a plan is code and could transform a value.
  */
 function redact(value, secrets) {
+  const base64 = s => { try { return btoa(String.fromCharCode(...new TextEncoder().encode(s))); } catch { return null; } };
+  const values = (secrets || []).filter(s => typeof s === 'string' && s.length >= 3);
   const forms = [];
-  for (const s of secrets || []) {
-    if (typeof s !== 'string' || s.length < 3) continue;
-    forms.push(s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s));
+  for (const s of values) {
+    forms.push(s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s), new URLSearchParams({ v: s }).toString().slice(2), base64(s));
   }
-  const list = [...new Set(forms)].sort((a, b) => b.length - a.length);
-  const clean = v => {
-    if (typeof v === 'string') return list.reduce((acc, x) => acc.split(x).join('•••'), v);
+  for (const a of values) for (const b of values) if (a !== b) forms.push(base64(`${a}:${b}`));
+  const list = [...new Set(forms.filter(Boolean))].sort((a, b) => b.length - a.length);
+  const open = new Set();
+  const object = v => {
     if (Array.isArray(v)) return v.map(clean);
-    if (v && typeof v === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(v))) {
+    if ([Object.prototype, null].includes(Object.getPrototypeOf(v))) {
       const o = {};
       for (const [k, x] of Object.entries(v)) o[clean(k)] = clean(x);
       return o;
     }
-    return v;
+    if (v instanceof Error) return clean({ name: v.name, message: v.message });
+    if (v instanceof Map || v instanceof Set) return clean([...v]);
+    if (typeof v.toJSON === 'function') return clean(v.toJSON());
+    return clean({ ...v });
+  };
+  const clean = v => {
+    if (typeof v === 'string') return list.reduce((acc, x) => acc.split(x).join('•••'), v);
+    if (typeof v === 'number' || typeof v === 'bigint') return values.includes(String(v)) ? '•••' : v;
+    if (!v || typeof v !== 'object') return v;
+    if (open.has(v)) return '[circular]';
+    open.add(v);
+    try { return object(v); } finally { open.delete(v); }
   };
   return clean(value);
 }
@@ -590,8 +628,11 @@ async function walk(o) {
     }).catch(() => {});
     await page.evaluate(setBoxWaiting, false).catch(() => {});
     if (res.a === 'stop') {
+      // Stop means stop, even for a plan that catches the error and goes on: from here the page sends no request and
+      // every helper refuses (see the guard after ctx).
       stopRequested = res;
-      throw new Error('stopped while waiting for the value box');
+      await context.route('**/*', route => route.abort()).catch(() => {});
+      throw new Error(STOPPED);
     }
   };
 
@@ -599,12 +640,15 @@ async function walk(o) {
     if (typeof fn !== 'function' || !isFunctionExpression(fn.toString())) {
       throw new Error('inPage needs an arrow function or a function expression: inPage(async ({ fields, arg }) => { … }, arg).');
     }
-    if (stopRequested) throw new Error('stopped while waiting for the value box');
     const o = {
       boxed: !!box, noBox: t.boxGone, emptyText: t.boxEmpty,
       required: box ? box.fields.filter(f => !f.optional).map(f => ({ name: f.name, label: f.label })) : [],
     };
     if (box) {
+      // A navigation not yet redrawn after (the load handler runs a moment later) leaves no box: draw it again, empty,
+      // and wait for it like any empty box.
+      const present = await page.evaluate(() => !!document.getElementById('__guided_smoke_box')).catch(() => true);
+      if (!present) await page.evaluate(drawBox, box).catch(() => {});
       for (let empty = await page.evaluate(emptyFields, o.required); empty.length; empty = await page.evaluate(emptyFields, o.required)) {
         await waitForBox(empty);
       }
@@ -645,6 +689,13 @@ async function walk(o) {
     sleep: ms => page.waitForTimeout(ms),
     log: message => console.log(String(message)),
   };
+  for (const name of ['goto', 'mark', 'text', 'secretBox', 'inPage', 'poll', 'visible', 'count', 'submit', 'download', 'sleep']) {
+    const helper = ctx[name];
+    ctx[name] = async (...args) => {
+      if (stopRequested) throw new Error(STOPPED);
+      return helper(...args);
+    };
+  }
 
   let stopped = false;
   let currentStep = null;

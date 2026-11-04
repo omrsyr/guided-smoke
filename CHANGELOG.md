@@ -27,6 +27,19 @@
 - **`run <file.js>` links the file instead of copying it.** The plan's relative `require`s keep working, the file is
   the one copy to edit, and the walk's `steps.snapshot.js` holds the plan itself, not the link. A different plan
   already stored under the same id is replaced only with `--force`.
+- **Stop during the box wait really stops.** Every helper refuses afterwards and the page sends no request, so a plan
+  that catches the error cannot go on changing the application.
+- **Masking covers more.** Form encoding, base64, Basic credentials (`a:b`) and numbers equal to a value are masked;
+  an `Error`, a `URL`, a `Map` or a class instance is turned into plain data before it is masked, so nothing leaves
+  the page with contents that were not looked at.
+- With nested modal dialogs the panel goes into the one opened last, which is the one on top. Clicks and keys in the
+  panel and the box no longer reach the page's handlers (close on an outside click, focus traps).
+- A value box that vanished from the page (a client-side route change) is drawn again and waited for, instead of
+  failing the step with "the value box is no longer on the page".
+- A plan stored by 0.1.2 as a copy of the same file, or a path differing only in case on Windows, counts as the same
+  plan for `run <file.js>`. `demo --project <name>` refuses to replace that project's own plan named "demo".
+- The demo server answers a request it cannot parse with 400 instead of ending the walk, accepts sign-in targets on its
+  own pages only and keeps the target after a mistyped password.
 - `references/safety.md` opens with "A plan is code": what a plan can do, which plans to run, and what the guards are
   and are not.
 - A browser test fails if a playwright-core upgrade breaks how `mark(locator.first())` finds the visible match.

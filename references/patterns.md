@@ -47,7 +47,8 @@ the account into a box on the page and the call runs inside the page. The script
 - When a required field is empty (the user moved on before typing, or a page load cleared the box), `inPage` waits:
   the box is outlined and shows **✔ Use these values**, and the panel offers only **■ Stop**. A step may therefore draw
   the box and call `inPage` at once. Still put the API steps before any step that reloads, so the user types once.
-  `secretBox(null)` removes the box.
+  `secretBox(null)` removes the box. **■ Stop** during that wait ends the walk at once: from then on the page sends no
+  request and every helper refuses, even if the plan catches the error.
 - Calls go to the page's own origin. Another origin needs the application's CORS and CSP to allow it.
 
 ## Reading and writing the database

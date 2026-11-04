@@ -111,6 +111,36 @@ test('values typed into the box are masked wherever they appear in a result', ()
   assert.strictEqual(redact('abcd', []), 'abcd');
 });
 
+test('masking also covers form encoding, base64, Basic credentials, numbers and values that are not plain data', () => {
+  const email = 'user@example.com';
+  const password = 'pa ss!42';
+  const b64 = s => Buffer.from(s, 'utf8').toString('base64');
+  class Holder { constructor() { this.token = password; } }
+  const shared = { note: email };
+  const looped = { name: 'loop' };
+  looped.self = looped;
+  const out = redact({
+    form: 'p=' + new URLSearchParams({ v: password }).toString().slice(2),
+    basic: 'Basic ' + b64(`${email}:${password}`),
+    plain64: b64(password),
+    error: new Error(`login failed for ${email}`),
+    url: new URL('https://app.local/api?user=' + encodeURIComponent(email)),
+    map: new Map([['who', email]]),
+    holder: new Holder(),
+    pin: 4242,
+    a: shared, b: shared,
+    looped,
+  }, [email, password, '4242']);
+  const text = JSON.stringify(out);
+  for (const leak of [email, password, encodeURIComponent(email), 'pa+ss%2142', b64(password), b64(`${email}:${password}`)]) {
+    assert.ok(!text.includes(leak), `${leak} leaked: ${text}`);
+  }
+  assert.deepStrictEqual(out.error, { name: 'Error', message: 'login failed for •••' });
+  assert.strictEqual(out.pin, '•••');
+  assert.deepStrictEqual(out.b, { note: '•••' }, 'a shared object is not a loop');
+  assert.strictEqual(out.looped.self, '[circular]');
+});
+
 test('poll stops when the condition holds or the time is up and returns the last value', async () => {
   let n = 0;
   const waits = [];
@@ -216,6 +246,61 @@ test('run links a plan file instead of copying it and does not replace another p
   assert.ok(fs.readFileSync(stored, 'utf8').includes(JSON.stringify(file)), 'the first link is kept');
   assert.match(cli('run', other, '--force').stderr, /No address/);
   assert.ok(fs.readFileSync(stored, 'utf8').includes(JSON.stringify(other)));
+
+  // A copy of the same file, as an earlier version stored it, is the same plan: it becomes a link without --force.
+  fs.writeFileSync(stored, fs.readFileSync(file, 'utf8'));
+  assert.match(cli('run', file).stderr, /No address/);
+  assert.ok(fs.readFileSync(stored, 'utf8').includes(JSON.stringify(file)));
+  if (process.platform === 'win32') {
+    const otherCase = file[0] === file[0].toUpperCase() ? file[0].toLowerCase() + file.slice(1) : file[0].toUpperCase() + file.slice(1);
+    assert.match(cli('run', otherCase).stderr, /No address/, 'a drive letter in another case names the same file');
+  }
+});
+
+test('demo --project does not replace a plan of that project named "demo"', () => {
+  const project = 'with-own-demo';
+  fs.mkdirSync(store.planDir(project, 'demo'), { recursive: true });
+  const own = "module.exports = { steps: [{ title: 'mine', run: async () => {} }] };";
+  fs.writeFileSync(store.planFile(project, 'demo'), own);
+  const r = spawnSync(process.execPath, [RUN, 'demo', '--project', project], { env: { ...process.env, GUIDED_SMOKE_HOME: home }, encoding: 'utf8' });
+  assert.strictEqual(r.status, 2, r.stderr);
+  assert.match(r.stderr, /already has a plan named "demo"/);
+  assert.strictEqual(fs.readFileSync(store.planFile(project, 'demo'), 'utf8'), own);
+});
+
+test('the demo server answers a broken request with 400, keeps sign-in targets on its own pages and after a typo', async () => {
+  const http = require('http');
+  const net = require('net');
+  const server = require('../../examples/demo/server');
+  const app = await server.start({ lang: 'en' });
+  const { port } = new URL(app.url);
+  const raw = line => new Promise(resolve => {
+    const s = net.connect(Number(port), '127.0.0.1', () => s.write(`${line}\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n`));
+    let data = '';
+    s.on('data', c => { data += c; });
+    s.on('end', () => resolve(data));
+    s.on('error', () => resolve(data));
+  });
+  const post = (p, body) => new Promise((resolve, reject) => {
+    const req = http.request(`${app.url}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }, res => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => resolve({ status: res.statusCode, location: res.headers.location, body: data }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+  try {
+    assert.match(await raw('GET //[ HTTP/1.1'), /^HTTP\/1\.1 400/);
+    assert.match(await raw('GET /login HTTP/1.1'), /^HTTP\/1\.1 200/, 'the server is still up');
+    const okBody = `user=${server.SIGN_IN.user}&password=${server.SIGN_IN.password}`;
+    assert.strictEqual((await post('/login', `${okBody}&next=${encodeURIComponent('//evil')}`)).location, `/orders/${server.ORDER}`);
+    assert.strictEqual((await post('/login', `${okBody}&next=${encodeURIComponent('/jobs')}`)).location, '/jobs');
+    const typo = await post('/login', `user=demo&password=wrong&next=${encodeURIComponent('/jobs')}`);
+    assert.match(typo.body, /name="next" value="\/jobs"/);
+  } finally {
+    await app.close();
+  }
 });
 
 test('init creates a plan from the template and refuses ids that read as walks', () => {

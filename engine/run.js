@@ -104,6 +104,21 @@ function pointerTo(file) {
   return `module.exports = require(${JSON.stringify(file)});\n`;
 }
 
+// Windows paths differ in case only between shells (C:\ and c:\); they name the same file.
+function samePath(a, b) {
+  const x = path.resolve(a);
+  const y = path.resolve(b);
+  return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
+/** Whether a stored plan already is this file: a link to it, or a copy of it left by an earlier version. */
+function samePlan(stored, file) {
+  if (!fs.existsSync(stored)) return true;
+  const text = fs.readFileSync(stored, 'utf8');
+  const m = POINTER.exec(text);
+  return m ? samePath(JSON.parse(m[1]), file) : text === fs.readFileSync(file, 'utf8');
+}
+
 /** The file a stored plan really is: the target of a pointer, else the plan file itself. */
 function planSource(planPath) {
   const m = POINTER.exec(fs.readFileSync(planPath, 'utf8'));
@@ -257,8 +272,12 @@ async function main() {
     process.env.GUIDED_SMOKE_LANG = lang;
     const demoProject = flags.project ? project : 'guided-smoke-demo';
     const planPath = path.join(__dirname, '..', 'examples', 'demo', 'steps.js');
-    // A pointer in the data folder, so that list and report find the demo plan like any other.
+    // A pointer in the data folder, so that list and report find the demo plan like any other. In a project of the
+    // user's (--project), a plan of their own named "demo" is never replaced.
     const pointer = store.planFile(demoProject, 'demo');
+    if (flags.project && !samePlan(pointer, planPath)) {
+      throw new UsageError(`Project ${demoProject} already has a plan named "demo" (${pointer}). Leave out --project to use the demo's own project.`);
+    }
     fs.mkdirSync(path.dirname(pointer), { recursive: true });
     fs.writeFileSync(pointer, pointerTo(planPath));
     const server = require('../examples/demo/server');
@@ -288,9 +307,8 @@ async function main() {
     if (!store.PLAN_ID.test(planId)) throw new UsageError(`Cannot derive a plan id from ${file}; add id: '...' to the module.`);
     // A different plan already stored under this id is replaced only with --force.
     const target = store.planFile(project, planId);
-    if (path.resolve(target) !== file) {
-      const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
-      if (existing !== null && existing !== pointerTo(file) && !flags.force) {
+    if (!samePath(target, file)) {
+      if (!samePlan(target, file) && !flags.force) {
         throw new UsageError(`Plan ${planId} already exists in this project (${target}). Give the module another id, or use --force to replace it with a link to ${file}.`);
       }
       fs.mkdirSync(path.dirname(target), { recursive: true });

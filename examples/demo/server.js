@@ -42,6 +42,7 @@ const db = {
     return 1;
   },
   reminders: () => store.reminders,
+  calls: () => store.calls.length,
 };
 
 const CSS = `
@@ -143,12 +144,20 @@ function runJob() {
   }, JOB_SECONDS * 1000);
 }
 
+// Resolves on end, on an aborted request and on an error alike: a broken request must not hold a handler forever.
 function readBody(req) {
   return new Promise(resolve => {
     let body = '';
     req.on('data', c => { if (body.length < 10000) body += c; });
     req.on('end', () => resolve(body));
+    req.on('close', () => resolve(body));
+    req.on('error', () => resolve(''));
   });
+}
+
+// A page of this application only: "/orders/1001", never "//host" (another origin) or a full address.
+function safeNext(value) {
+  return /^\/(?!\/)[\w/-]*$/.test(value || '') ? value : null;
 }
 
 function cookie(req, name) {
@@ -158,7 +167,13 @@ function cookie(req, name) {
 
 function handler(lang) {
   const T = TEXTS[lang] || TEXTS.en;
-  return async (req, res) => {
+  // A request the handler cannot parse (an address like "//[") gets 400; it must not end the walk's process.
+  return (req, res) => handle(req, res).catch(() => {
+    if (!res.headersSent) res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('Bad request');
+  });
+
+  async function handle(req, res) {
     const url = new URL(req.url, 'http://127.0.0.1');
     const send = (status, type, body, headers = {}) => {
       res.writeHead(status, { 'Content-Type': type, 'Content-Security-Policy': "default-src 'self'; form-action 'self'", ...headers });
@@ -195,17 +210,16 @@ function handler(lang) {
     }
 
     if (url.pathname === '/login') {
-      if (req.method === 'POST') {
-        const form = new URLSearchParams(await readBody(req));
-        if (form.get('user') === SIGN_IN.user && form.get('password') === SIGN_IN.password) {
-          const sid = crypto.randomBytes(16).toString('hex');
-          store.sessions.add(sid);
-          const next = /^\/[\w/-]*$/.test(form.get('next') || '') ? form.get('next') : `/orders/${ORDER}`;
-          return send(303, 'text/plain', '', { Location: next, 'Set-Cookie': `sid=${sid}; HttpOnly; SameSite=Lax; Path=/` });
-        }
+      const form = req.method === 'POST' ? new URLSearchParams(await readBody(req)) : null;
+      if (form && form.get('user') === SIGN_IN.user && form.get('password') === SIGN_IN.password) {
+        const sid = crypto.randomBytes(16).toString('hex');
+        store.sessions.add(sid);
+        const next = safeNext(form.get('next')) || `/orders/${ORDER}`;
+        return send(303, 'text/plain', '', { Location: next, 'Set-Cookie': `sid=${sid}; HttpOnly; SameSite=Lax; Path=/` });
       }
-      const failed = req.method === 'POST';
-      const next = esc(url.searchParams.get('next') || '');
+      // A failed sign-in keeps where the user was going.
+      const failed = !!form;
+      const next = esc(safeNext(form ? form.get('next') : url.searchParams.get('next')) || '');
       return html(page(T, lang, T.signIn, `<section class="card login"><h1>${esc(T.signIn)}</h1>
 ${failed ? `<div class="alert alert-error" role="alert">${esc(T.wrongSignIn)}</div>` : ''}
 <form method="post" action="/login"><input type="hidden" name="next" value="${next}">
@@ -239,7 +253,7 @@ ${failed ? `<div class="alert alert-error" role="alert">${esc(T.wrongSignIn)}</d
       return html(page(T, lang, T.helpTitle, `<section class="card"><h1>${esc(T.helpTitle)}</h1><p id="help-due">${esc(T.helpDue)}</p></section>`));
     }
     return send(404, 'text/plain', 'Not found');
-  };
+  }
 }
 
 /** Starts the demo on a free port of 127.0.0.1 with fresh data; resolves to { url, close }. */
