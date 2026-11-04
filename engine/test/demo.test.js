@@ -20,6 +20,8 @@ const playwright = (() => {
 })();
 const chosen = (() => { try { return browser.choose(process.env.GUIDED_SMOKE_BROWSER); } catch { return null; } })();
 const skip = !playwright ? 'playwright-core is not installed (node engine/run.js setup)' : !chosen ? 'no Chrome or Edge' : false;
+// CI sets GUIDED_SMOKE_REQUIRE_BROWSER: there a skipped browser test would hide a broken setup.
+if (skip && process.env.GUIDED_SMOKE_REQUIRE_BROWSER) throw new Error(`Browser tests required but cannot run: ${skip}.`);
 
 const signIn = {
   when: '#user',

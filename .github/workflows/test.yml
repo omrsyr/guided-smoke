@@ -1,0 +1,38 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [24]
+        include:
+          # The oldest Node.js the skill claims to support.
+          - os: ubuntu-latest
+            node: 18
+    env:
+      # The hosted runners ship Google Chrome; a missing browser must fail the run, not skip the browser tests.
+      GUIDED_SMOKE_BROWSER: chrome
+      GUIDED_SMOKE_REQUIRE_BROWSER: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node engine/run.js setup
+      - run: node engine/run.js doctor
+      - run: node --test engine/test/engine.test.js
+      - run: node --test engine/test/demo.test.js

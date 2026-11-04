@@ -1,5 +1,7 @@
 # guided-smoke
 
+[![test](https://github.com/omrsyr/guided-smoke/actions/workflows/test.yml/badge.svg)](https://github.com/omrsyr/guided-smoke/actions/workflows/test.yml)
+
 **A smoke test you can follow.** A Claude Code skill that walks you through a change in a real browser: Playwright
 performs each step, a panel on the page tells you **what was done** and **what you should see** (outlined in orange),
 and nothing moves on until you click **✔ Correct, continue**.
@@ -33,6 +35,9 @@ checklist, clicking through it alone, or watching a script race past.
 - Claude Code (or another agent with shell access) on Windows, macOS or Linux
 - Node.js 18 or newer
 - Google Chrome or Microsoft Edge (no browser is downloaded; the installed one is driven)
+
+Every push runs the tests on Windows, macOS and Linux (GitHub Actions): the engine's tests, and the demo walked
+headless in Chrome. Edge is driven the same way, but the hosted runners only test Chrome.
 
 ## Install
 

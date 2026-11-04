@@ -1,5 +1,7 @@
 # guided-smoke
 
+[![test](https://github.com/omrsyr/guided-smoke/actions/workflows/test.yml/badge.svg)](https://github.com/omrsyr/guided-smoke/actions/workflows/test.yml)
+
 **Takip edebileceğin bir smoke testi.** Bir değişikliği gerçek bir tarayıcıda sana adım adım gösteren Claude Code
 skill'i: Playwright her adımı kendisi yapar, sayfadaki panel **ne yapıldığını** ve **ne görmen gerektiğini** yazar
 (ilgili yer turuncu çerçeveyle işaretlenir); sen **✔ Doğru, devam** demeden sonraki adıma geçilmez.
@@ -33,6 +35,9 @@ listesini okuman, tek başına tıklaman ya da hızla akıp giden bir betiği iz
 - Windows, macOS ya da Linux'ta Claude Code (ya da kabuk erişimi olan başka bir ajan)
 - Node.js 18 ya da üstü
 - Google Chrome ya da Microsoft Edge (tarayıcı indirilmez; kurulu olan sürülür)
+
+Her push'ta testler Windows, macOS ve Linux'ta koşar (GitHub Actions): motorun testleri ve Chrome'da headless demo
+koşusu. Edge de aynı yolla sürülür, ancak GitHub'ın makinelerinde yalnız Chrome sınanır.
 
 ## Kurulum
 
