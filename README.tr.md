@@ -76,8 +76,9 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
 ```
 
 İşe yarayan bayraklar: `--browser chrome|edge`, `--base https://localhost:5001`, `--pace slow|normal|fast`, `--from 5`,
-`--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (varsayılan: sistemin dili), `--skip-writes`, `--fresh`.
-Ayrıntı: [SKILL.md](SKILL.md).
+`--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (varsayılan: sistemin dili), `--skip-writes`, `--fresh`,
+`--auto` (kontrolü geçen adım 3 sn sonra kendiliğinden geçer), `--panel left,min` (köşe, küçültülmüş başla),
+`--video`, `--trace` (kayıtlar koşu klasöründe; değer kutusu izin dışında kalır). Ayrıntı: [SKILL.md](SKILL.md).
 
 ## Giriş ve veriler
 

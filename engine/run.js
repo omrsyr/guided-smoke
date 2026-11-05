@@ -37,11 +37,13 @@ const FLAGS = {
   run: {
     browser: 'value', base: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool',
     'skip-writes': 'bool', 'allow-remote-writes': 'bool', 'work-item': 'value', fresh: 'bool', screens: 'value',
-    locale: 'value', lang: 'value', 'keep-downloads': 'bool', force: 'bool',
+    locale: 'value', lang: 'value', 'keep-downloads': 'bool', force: 'bool', auto: 'bool', trace: 'bool', video: 'bool',
+    panel: 'value',
   },
   demo: {
     browser: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool', 'skip-writes': 'bool',
-    fresh: 'bool', screens: 'value', locale: 'value', lang: 'value', 'keep-downloads': 'bool',
+    fresh: 'bool', screens: 'value', locale: 'value', lang: 'value', 'keep-downloads': 'bool', auto: 'bool', trace: 'bool',
+    video: 'bool', panel: 'value',
   },
   list: {},
   report: {},
@@ -141,6 +143,20 @@ function loadPlan(file) {
     if (s.skipTo && !s.approve) throw new UsageError(`${file}: step ${i + 1} uses skipTo without approve.`);
   });
   return plan;
+}
+
+/** --panel left|right and/or min, comma-separated: "left", "min", "left,min". Default: right, open. */
+function parsePanel(value) {
+  const panel = { side: 'right', min: false };
+  if (value == null) return panel;
+  const parts = String(value).toLowerCase().split(',').map(p => p.trim()).filter(Boolean);
+  const sides = parts.filter(p => p === 'left' || p === 'right');
+  if (!parts.length || sides.length > 1 || parts.some(p => !['left', 'right', 'min'].includes(p))) {
+    throw new UsageError('--panel takes left or right and/or min, e.g. --panel left,min.');
+  }
+  if (sides.length) panel.side = sides[0];
+  panel.min = parts.includes('min');
+  return panel;
 }
 
 function parseNumbers(value, total, flag) {
@@ -359,6 +375,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
   if (flags.screens && !['diff', 'all'].includes(flags.screens)) throw new UsageError('--screens must be diff or all (leave it out for none).');
   if (flags.lang && !LANGUAGES.includes(flags.lang)) throw new UsageError(`--lang must be one of: ${LANGUAGES.join(', ')}.`);
   if (flags.locale && !/^[a-z]{2}(-[A-Z]{2})?$/.test(flags.locale)) throw new UsageError('--locale looks like tr-TR or en-US.');
+  const panel = parsePanel(flags.panel);
   const base = flags.base || plan.base;
   if (!base) throw new UsageError('No address: pass --base https://host:port or set base in the plan.');
   try { new URL(base); } catch { throw new UsageError(`--base "${base}" is not a URL.`); }
@@ -381,6 +398,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
         allowRemoteWrites: !!flags['allow-remote-writes'], workItem: flags['work-item'] || plan.workItem || null,
         fresh: !!flags.fresh, screens: flags.screens || null, locale: flags.locale || plan.locale || systemLocale(),
         lang: pickLanguage(flags.lang || plan.lang), keepDownloads: !!flags['keep-downloads'],
+        auto: !!flags.auto, trace: !!flags.trace, video: !!flags.video, panel,
       },
     });
   } catch (e) {

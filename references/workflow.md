@@ -60,7 +60,9 @@ node <skill-dir>/engine/run.js run <plan-id> --base <url> [--work-item N] [other
   profile keeps the session for the next walk of this project (`--fresh` for a throw-away one).
 - Tell the user: green **✔ Correct, continue** moves on, red **✖ Different** asks for a short note, grey **■ Stop**
   ends the walk, **Minimize** hides the panel, **📷** saves a screenshot of the current step. When the automatic check
-  failed, **✔** takes a second click; the report flags such steps.
+  failed, **✔** takes a second click; the report flags such steps. With `--auto`, a step whose check passed goes on by
+  itself after a 3 s countdown; **⏸ Wait** or any button keeps it for the user. Suggest `--auto` only for a re-run
+  the user already walked once by hand.
 - Do not poll. Wait until the command finishes.
 
 ## 6. Report

@@ -17,7 +17,10 @@ const { walk } = require('../engine');
  * @param {Function} [o.onWait] async page => {} when a step waits for the box, before it is filled in
  * @param {boolean} [o.stopOnWait] press Stop instead when a step waits for the box
  * @param {object[]} [o.clicks]  receives { value, text } for every panel button clicked
- * @param {Function} [o.onPanel] async (page, { header, title }) => {} before each answer
+ * @param {Function} [o.onPanel] async (page, { header, title }) => {} before each answer (with letAuto: on every tick
+ *                               while a countdown runs)
+ * @param {boolean} [o.letAuto]  leave a panel alone while its --auto countdown runs
+ * @param {object} [o.options]   more walk options (auto, trace, video, panel)
  */
 async function autoWalk(o) {
   let context = null;
@@ -53,8 +56,13 @@ async function autoWalk(o) {
           const panel = page.locator('#__guided_smoke');
           await o.onPanel(page, { header: await panel.locator('span').first().textContent(), title: await panel.locator(':scope > div').nth(1).textContent() });
         }
-        if (o.clicks) o.clicks.push({ value: await answer.getAttribute('data-guided-smoke-answer'), text: await answer.textContent() });
-        await answer.click({ timeout: 2000 });
+        const counting = o.letAuto && await page.locator('#__guided_smoke [data-guided-smoke-countdown]').count();
+        if (!counting) {
+          // A minimized panel is opened first, as a user would.
+          if (!(await answer.isVisible())) await page.locator('#__guided_smoke [data-guided-smoke-min]').click({ timeout: 2000 });
+          if (o.clicks) o.clicks.push({ value: await answer.getAttribute('data-guided-smoke-answer'), text: await answer.textContent() });
+          await answer.click({ timeout: 2000 });
+        }
       }
     } catch { /* the page is navigating */ } finally {
       busy = false;
@@ -65,7 +73,7 @@ async function autoWalk(o) {
       plan: o.plan, planId: o.plan.id || 'plan', walkId: `${o.plan.id || 'plan'}-1`, project: 'test', walkDir: o.walkDir,
       playwright, profile: null,
       options: { browser: o.browser, base: o.base, pace: 'fast', allowed: null, fresh: true, lang: o.lang,
-        locale: o.lang === 'tr' ? 'tr-TR' : 'en-US', screens: null },
+        locale: o.lang === 'tr' ? 'tr-TR' : 'en-US', screens: null, ...(o.options || {}) },
     });
   } finally {
     clearInterval(timer);

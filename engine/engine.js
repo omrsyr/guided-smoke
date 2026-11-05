@@ -12,6 +12,7 @@ const PACE = { slow: 400, normal: 200, fast: 60 };
 const DEFAULT_LOGIN = /(login|signin|sign-in|giris|auth|account\/)/i;
 const LOGIN_TIMEOUT_MS = 15 * 60 * 1000;
 const STOPPED = 'The walk was stopped.';
+const AUTO_SECONDS = 3;
 
 const COLORS = { pass: '#198754', diff: '#dc3545', stop: '#6c757d', yes: '#198754', skip: '#fd7e14', info: '#0d6efd', warn: '#fd7e14' };
 
@@ -65,6 +66,8 @@ function installUiHost() {
 }
 
 // Runs in the page. Draws the panel; every text goes in through textContent, never as HTML.
+// s.side puts it at the bottom left or right; s.min starts it minimized; s.countdown (--auto) answers ✔ by itself when
+// the time is up, unless the user presses any button first.
 function drawPanel(s) {
   const old = document.getElementById('__guided_smoke');
   if (old) old.remove();
@@ -75,7 +78,7 @@ function drawPanel(s) {
     return e;
   };
   const box = el('div', null, {
-    position: 'fixed', right: '16px', bottom: '16px', width: '460px', maxHeight: '75vh', overflow: 'auto',
+    position: 'fixed', ...(s.side === 'left' ? { left: '16px' } : { right: '16px' }), bottom: '16px', width: '460px', maxHeight: '75vh', overflow: 'auto',
     zIndex: '2147483647', background: '#fff', border: '1px solid #ced4da', borderLeft: `6px solid ${s.accent}`,
     borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,.25)', font: '14px/1.5 "Segoe UI", system-ui, sans-serif',
     color: '#212529', padding: '12px 14px', textAlign: 'left',
@@ -84,6 +87,7 @@ function drawPanel(s) {
   const head = el('div', null, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#6c757d' });
   head.appendChild(el('span', s.header));
   const min = el('button', s.t.minimize, { border: '1px solid #ced4da', background: '#f8f9fa', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', color: '#212529' });
+  min.setAttribute('data-guided-smoke-min', '');
   head.appendChild(min);
   box.appendChild(head);
   box.appendChild(el('div', s.title, { fontWeight: '600', fontSize: '16px', margin: '4px 0 6px' }));
@@ -103,6 +107,20 @@ function drawPanel(s) {
       { marginTop: '8px', fontWeight: '600', color: s.auto.ok ? '#198754' : '#dc3545' }));
   }
   (s.warnings || []).forEach(w => body.appendChild(el('div', w, { marginTop: '8px', fontWeight: '600', color: '#b35c00' })));
+  let timer = null;
+  let line = null;
+  let hold = null;
+  const stopCountdown = () => {
+    if (timer) clearInterval(timer);
+    timer = null;
+    if (line) line.remove();
+    if (hold) hold.remove();
+  };
+  if (s.countdown) {
+    line = el('div', null, { marginTop: '8px', color: '#0d6efd', fontWeight: '600' });
+    line.setAttribute('data-guided-smoke-countdown', '');
+    body.appendChild(line);
+  }
   const note = el('textarea', null, { display: 'none', width: '100%', marginTop: '8px', minHeight: '60px', boxSizing: 'border-box' });
   note.placeholder = s.t.notePlaceholder;
   body.appendChild(note);
@@ -118,6 +136,7 @@ function drawPanel(s) {
     });
     btn.setAttribute('data-guided-smoke-answer', b.value);
     btn.onclick = () => {
+      stopCountdown();
       // ✔ on a failed automatic check takes a second click: a quick click must not pass over a red line unseen.
       if (b.confirm && !btn.hasAttribute('data-guided-smoke-confirm')) {
         btn.setAttribute('data-guided-smoke-confirm', '');
@@ -138,6 +157,27 @@ function drawPanel(s) {
     };
     bar.appendChild(btn);
   });
+  if (s.countdown) {
+    hold = el('button', s.countdown.hold, { background: '#fff', color: '#0d6efd', border: '1px solid #0d6efd', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer' });
+    hold.setAttribute('data-guided-smoke-hold', '');
+    hold.onclick = stopCountdown;
+    bar.appendChild(hold);
+    let left = s.countdown.seconds;
+    const tick = () => {
+      if (left <= 0) {
+        stopCountdown();
+        clear();
+        if (window.__guidedSmokeUi) window.__guidedSmokeUi.hide('panel');
+        box.remove();
+        window.__guidedSmokeAnswer('pass', '', 'auto');
+        return;
+      }
+      line.textContent = s.countdown.text.replace('{s}', String(left));
+      left--;
+    };
+    tick();
+    timer = setInterval(tick, 1000);
+  }
   if (s.shot) {
     const shot = el('button', s.t.shot, { background: '#fff', color: '#0d6efd', border: '1px solid #0d6efd', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer' });
     shot.onclick = async () => {
@@ -150,10 +190,16 @@ function drawPanel(s) {
   }
   body.appendChild(bar);
   box.appendChild(body);
+  const minimize = on => {
+    body.style.display = on ? 'none' : '';
+    min.textContent = on ? s.t.open : s.t.minimize;
+  };
+  minimize(!!s.min);
+  // The choice carries over to the next panels of the walk.
   min.onclick = () => {
-    const hidden = body.style.display === 'none';
-    body.style.display = hidden ? '' : 'none';
-    min.textContent = hidden ? s.t.minimize : s.t.open;
+    const on = body.style.display !== 'none';
+    minimize(on);
+    if (window.__guidedSmokeMin) window.__guidedSmokeMin(on);
   };
   if (window.__guidedSmokeUi) window.__guidedSmokeUi.show('panel', box);
   else document.body.appendChild(box);
@@ -162,7 +208,8 @@ function drawPanel(s) {
 // Runs in the page. Draws the box where the user types values a step needs (an account, a secret); null removes it.
 // The values stay in the page: the engine never reads them back, inPage() masks them in whatever it returns.
 // While a step waits for the box (s.waiting) it is outlined in orange and shows a button that sends nothing: it only
-// tells the engine the box is filled in.
+// tells the engine the box is filled in. s.side is the corner opposite the panel; s.masked (a video or trace is being
+// recorded) shows every field as dots, not only the secret ones.
 function drawBox(s) {
   const old = document.getElementById('__guided_smoke_box');
   if (old) old.remove();
@@ -177,7 +224,7 @@ function drawBox(s) {
     return e;
   };
   const box = el('div', null, {
-    position: 'fixed', left: '16px', bottom: '16px', width: '340px', maxHeight: '75vh', overflow: 'auto',
+    position: 'fixed', ...(s.side === 'right' ? { right: '16px' } : { left: '16px' }), bottom: '16px', width: '340px', maxHeight: '75vh', overflow: 'auto',
     zIndex: '2147483646', background: '#fff', border: '1px solid #ced4da', borderLeft: '6px solid #0d6efd',
     borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,.25)', font: '13px/1.4 "Segoe UI", system-ui, sans-serif',
     color: '#212529', padding: '10px 12px', textAlign: 'left',
@@ -197,6 +244,7 @@ function drawBox(s) {
       border: '1px solid #ced4da', borderRadius: '4px', font: 'inherit', color: '#212529', background: '#fff',
     });
     input.type = f.secret ? 'password' : f.type;
+    if (s.masked) input.style.webkitTextSecurity = 'disc';
     input.autocomplete = f.secret ? 'new-password' : 'off';
     input.spellcheck = false;
     input.setAttribute('data-guided-smoke-field', f.name);
@@ -402,7 +450,8 @@ function firstLine(error) {
  * @param {string} o.profile    browser profile folder (ignored with fresh)
  * @param {object} o.playwright playwright-core
  * @param {object} o.options    { browser, base, pace, allowed:Set|null, filterNote, skipWrites, allowRemoteWrites, workItem,
- *                                fresh, screens:'diff'|'all'|null, locale, lang, keepDownloads }
+ *                                fresh, screens:'diff'|'all'|null, locale, lang, keepDownloads, auto, trace, video,
+ *                                panel: { side:'left'|'right', min } }
  */
 async function walk(o) {
   const { plan, planId, walkId, project, walkDir, playwright, options } = o;
@@ -415,13 +464,17 @@ async function walk(o) {
   const metaFile = path.join(walkDir, 'walk.json');
   const screensDir = path.join(walkDir, 'screens');
   const downloadsDir = path.join(walkDir, 'downloads');
-  const counts = { pass: 0, diff: 0, skip: 0, against: 0 };
+  const videoDir = path.join(walkDir, 'video');
+  const counts = { pass: 0, diff: 0, skip: 0, against: 0, auto: 0 };
+  const side = options.panel && options.panel.side === 'left' ? 'left' : 'right';
+  let panelMin = !!(options.panel && options.panel.min);
 
   const meta = {
     walkId, planId, project, title: plan.title || planId, workItem: options.workItem || plan.workItem || null,
     base, remote, browser: options.browser.name, browserSource: options.browser.source, lang: options.lang,
     locale: options.locale || null, pace: options.pace, fresh: !!options.fresh, screens: options.screens || null,
     filter: options.filterNote || null, skipWrites: !!options.skipWrites, allowRemoteWrites: !!options.allowRemoteWrites,
+    auto: !!options.auto, trace: !!options.trace, video: !!options.video, traces: [], videos: [],
     totalSteps: total, titles: steps.map(s => s.title), startedAt: new Date().toISOString(), readyAt: null, endedAt: null,
     measuredSeconds: null, result: 'running',
   };
@@ -433,6 +486,7 @@ async function walk(o) {
     if (event.answer === 'pass' || event.answer === 'diff') counts[event.answer]++;
     if (event.answer === 'skip') counts.skip++;
     if (event.againstCheck) counts.against++;
+    if (event.answeredBy === 'auto') counts.auto++;
     console.log(`[${event.n}] ${event.answer}${event.reason ? ' (' + event.reason + ')' : ''}${event.note ? ' — ' + event.note : ''}`);
   };
 
@@ -451,9 +505,46 @@ async function walk(o) {
     args: ['--start-maximized', ...(options.locale ? [`--lang=${options.locale}`] : [])],
     acceptDownloads: true,
     ...(options.locale ? { locale: options.locale } : {}),
+    ...(options.video ? { recordVideo: { dir: videoDir, size: { width: 1280, height: 720 } } } : {}),
   });
 
   await context.addInitScript(installUiHost);
+
+  // --video: Playwright writes one file per page when the browser closes; they get stable names in the walk folder.
+  const closeBrowser = async () => {
+    await context.close().catch(() => {});
+    if (!options.video || !fs.existsSync(videoDir)) return;
+    const files = fs.readdirSync(videoDir).filter(f => f.endsWith('.webm') && !/^walk(-\d+)?\.webm$/.test(f)).sort();
+    files.forEach((f, i) => {
+      const name = i === 0 ? 'walk.webm' : `walk-${i + 1}.webm`;
+      fs.renameSync(path.join(videoDir, f), path.join(videoDir, name));
+      meta.videos.push(`video/${name}`);
+    });
+    saveMeta();
+  };
+
+  // --trace: recorded after the sign-in, in parts. A part ends when the value box appears and the next begins when the
+  // plan removes the box, so what the user types there and what is sent with it are in no part. Each part is a tracing
+  // session of its own: chunks of one session carry network bodies across the pause. A part still holds cookies and
+  // page data.
+  let tracing = false;
+  const traceResume = async () => {
+    if (!options.trace || !meta.readyAt || tracing || box || closed) return;
+    try {
+      await context.tracing.start({ screenshots: true, snapshots: true, sources: false, title: `${walkId} · ${meta.traces.length + 1}` });
+      tracing = true;
+    } catch { /* the browser is gone */ }
+  };
+  const tracePause = async () => {
+    if (!tracing) return;
+    tracing = false;
+    const name = `trace-${meta.traces.length + 1}.zip`;
+    try {
+      await context.tracing.stop({ path: path.join(walkDir, name) });
+      meta.traces.push(name);
+      saveMeta();
+    } catch { /* the browser is gone */ }
+  };
 
   let pending = null;
   let current = null;
@@ -482,9 +573,10 @@ async function walk(o) {
     return path.relative(walkDir, file).split(path.sep).join('/');
   };
 
-  await context.exposeFunction('__guidedSmokeAnswer', (a, note) => {
-    if (pending) { const r = pending; pending = null; r({ a, note }); }
+  await context.exposeFunction('__guidedSmokeAnswer', (a, note, by) => {
+    if (pending) { const r = pending; pending = null; r({ a, note, by: by === 'auto' ? 'auto' : undefined }); }
   });
+  await context.exposeFunction('__guidedSmokeMin', on => { panelMin = !!on; });
   // The value box's button: the user has filled it in. Nothing travels with the call.
   let boxReady = null;
   await context.exposeFunction('__guidedSmokeBoxReady', () => {
@@ -498,14 +590,16 @@ async function walk(o) {
 
   // A navigation wipes the panel and the value box; draw them again. The box comes back empty: its values are gone.
   let box = null;
+  // Every panel takes the walk's corner and the user's last minimize choice (--panel sets both at the start).
+  const dressed = panel => ({ ...panel, side, min: panelMin });
   page.on('load', async () => {
     if (box) { try { await page.evaluate(drawBox, box); } catch { /* page still loading */ } }
-    if (current) { try { await page.evaluate(drawPanel, current); } catch { /* page still loading */ } }
+    if (current) { try { await page.evaluate(drawPanel, dressed(current)); } catch { /* page still loading */ } }
   });
 
   const draw = async panel => {
     for (let i = 0; i < 5; i++) {
-      try { await page.evaluate(drawPanel, panel); return; } catch { await page.waitForTimeout(500).catch(() => {}); }
+      try { await page.evaluate(drawPanel, dressed(panel)); return; } catch { await page.waitForTimeout(500).catch(() => {}); }
     }
   };
 
@@ -588,6 +682,7 @@ async function walk(o) {
     if (spec == null || spec === false) {
       box = null;
       await page.evaluate(drawBox, null).catch(() => {});
+      await traceResume();
       return;
     }
     const fields = Array.isArray(spec.fields) ? spec.fields : [];
@@ -595,8 +690,10 @@ async function walk(o) {
     if (!fields.length || fields.some(f => !f || !/^[A-Za-z_][\w-]*$/.test(String(f.name || '')) || !f.label) || new Set(names).size !== names.length) {
       throw new Error('secretBox needs fields: [{ name, label, secret?, optional? }] with unique names.');
     }
+    await tracePause();
     box = {
       title: String(spec.title || t.boxTitle), note: t.boxNote, idle: t.boxIdle, useLabel: t.boxUse, emptyText: t.boxEmpty, waiting: false,
+      side: side === 'left' ? 'right' : 'left', masked: !!(options.video || options.trace),
       fields: fields.map(f => ({ name: f.name, label: String(f.label), secret: !!f.secret, type: f.type === 'email' ? 'email' : 'text', optional: !!f.optional })),
     };
     await page.evaluate(drawBox, box);
@@ -721,11 +818,13 @@ async function walk(o) {
       meta.result = 'stopped';
       meta.error = 'browser closed before sign-in';
       saveMeta();
+      await closeBrowser();
       if (options.fresh) fs.rmSync(profile, { recursive: true, force: true });
       return { meta, counts, signedOut: false };
     }
     meta.readyAt = new Date().toISOString();
     saveMeta();
+    await traceResume();
 
     // ---- steps ----
     let skipUntil = 0;
@@ -782,9 +881,13 @@ async function walk(o) {
       }
       if (options.screens === 'all') { try { lastShot = await takeShot(n); } catch { /* keep going */ } }
 
+      // --auto: only a step whose automatic check passed without plan warnings goes on by itself, after a countdown.
+      const countdown = options.auto && auto && auto.ok && !warnings.length
+        ? { seconds: AUTO_SECONDS, text: t.autoIn, hold: t.autoHold } : undefined;
       const res = await ask(panelFor(n, s, {
         auto,
         warnings,
+        countdown,
         expectLabel: expectLabel(t, marked),
         buttons: [
           { label: t.pass, value: 'pass', color: COLORS.pass, confirm: auto && !auto.ok ? t.passConfirm : undefined },
@@ -795,10 +898,11 @@ async function walk(o) {
       if (res.a === 'diff' && options.screens === 'diff' && !lastShot) { try { lastShot = await takeShot(n); } catch { /* keep going */ } }
       record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: res.a, note: res.note || undefined,
         auto: auto || undefined, againstCheck: (res.a === 'pass' && auto && !auto.ok) || undefined, error: runError ? firstLine(runError) : undefined, markMissing: markMissing || undefined,
-        warnings: warnings.length ? warnings : undefined, seconds: res.seconds, screenshot: lastShot || undefined });
+        warnings: warnings.length ? warnings : undefined, answeredBy: res.by, seconds: res.seconds, screenshot: lastShot || undefined });
       if (res.a === 'stop') { stopped = true; break; }
     }
     shotIndex = null;
+    await tracePause();
 
     meta.endedAt = new Date().toISOString();
     meta.measuredSeconds = Math.round((Date.parse(meta.endedAt) - Date.parse(meta.readyAt)) / 1000);
@@ -809,13 +913,14 @@ async function walk(o) {
     const closing = closed ? { a: 'close' } : await ask({
       header: format(t.step, { n: total, total }), accent: COLORS.info, t, didLabel: t.did, expectLabel: t.outcome,
       title: t.doneTitle, did: t.doneDid, shot: false,
-      expect: [format(t.doneSummary, counts), ...(counts.against ? [format(t.doneAgainst, counts)] : [])],
+      expect: [format(t.doneSummary, counts), ...(counts.auto ? [format(t.doneAuto, counts)] : []),
+        ...(counts.against ? [format(t.doneAgainst, counts)] : [])],
       buttons: [
         { label: t.close, value: 'close', color: COLORS.info },
         ...(options.fresh ? [] : [{ label: t.signOut, value: 'signout', color: COLORS.stop }]),
       ],
     }).catch(() => ({ a: 'close' }));
-    await context.close().catch(() => {});
+    await closeBrowser();
     if (options.fresh || closing.a === 'signout') fs.rmSync(profile, { recursive: true, force: true });
     return { meta, counts, signedOut: closing.a === 'signout' };
   } catch (e) {
@@ -824,7 +929,8 @@ async function walk(o) {
     meta.result = 'error';
     meta.error = firstLine(e);
     saveMeta();
-    await context.close().catch(() => {});
+    await tracePause();
+    await closeBrowser();
     if (options.fresh) fs.rmSync(profile, { recursive: true, force: true });
     throw e;
   }

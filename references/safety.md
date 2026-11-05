@@ -51,6 +51,16 @@ steps too (see writing-steps rule 8).
   a failed check.
 - Use the project's existing database tooling; read credentials from configuration without printing them.
 
+## Recordings (`--video`, `--trace`)
+
+- Both are off unless asked for, and both stay in the walk folder.
+- A **video** shows the whole screen of the walk, the sign-in page included (the password field shows dots; the user
+  name is visible). While it records, every field of the value box shows dots.
+- A **trace** starts after the sign-in. Each part is a separate recording that ends when the value box appears and
+  begins again when the plan removes it, so the box's values and the requests sent with them are in no part. A part
+  still holds DOM snapshots, screenshots and network traffic: page data and the session cookie. Treat it like a
+  password: never attach it to a work item, a chat or a ticket.
+
 ## What is recorded
 
 `events.jsonl` keeps step numbers and titles, answers, notes, automatic-check texts, plan warnings, durations, and

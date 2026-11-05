@@ -60,6 +60,10 @@ Flags (order free; unknown flags and bad values are refused with a clear message
 | `--screens diff\|all` | Screenshots on ✖ answers or on every step (default: none; the panel always has a 📷 button) |
 | `--locale tr-TR\|en-US` | Browser language and locale (date inputs, validation messages). Default: the plan's `locale`, else the system's |
 | `--fresh` | Throw-away browser profile for this walk (sign in again, nothing kept) |
+| `--auto` | A step whose automatic check passed without plan warnings goes on by itself after a 3 s countdown (⏸ Wait or any button stops it). Failed or missing checks, permitted steps and value-box waits always wait. The report marks such steps "by itself" |
+| `--panel left|right[,min]` | Panel corner (the value box takes the other one); `min` starts it minimized. The user's minimize choice carries over |
+| `--video` | Record the walk as `video/walk.webm` in the walk folder |
+| `--trace` | Record a Playwright trace after the sign-in, in parts (`trace-1.zip`, …) that leave out the value box. Open with `npx playwright show-trace` |
 | `--reset-login` | Delete this project's saved sign-in (`node engine/run.js reset-login`) |
 
 ## The engine
@@ -104,3 +108,5 @@ The project is the git repository's folder name (override with `--project`). Dat
   without one (or without access), that part is simply left out.
 - Smoke time belongs to the work item being tested. The report's "measured walk time" is the browser walk only; the
   user's own extra checking is theirs to add.
+- `--video` and `--trace` files hold what the screen showed, cookies and page data. They stay in the walk folder; never
+  attach them to a work item or send them anywhere. Suggest them only when the user asks for a recording.

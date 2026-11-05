@@ -11,6 +11,8 @@ const LABELS = {
     pasteTitle: 'Smoke ({date}, {pass}/{run}; guided-smoke {walk})', notRun: 'not run', results: { completed: 'completed', stopped: 'stopped by the user', error: 'ended with an error', running: 'still running or interrupted' },
     against: '✔ given although the automatic check failed', againstSummary: '⚠ {count} passed although the automatic check failed: {steps}.',
     againstShort: 'automatic check failed',
+    byAuto: 'by itself', autoSummary: '{count} of the passed steps went on by themselves (--auto).',
+    recordings: 'Recordings', recordingsNote: 'they hold what the screen showed, cookies and page data: keep them on this machine and do not attach them to the work item',
     pass: 'passed', diff: 'different', skip: 'skipped', none: 'not run', reasons: { filter: 'filter', 'follows-skip': 'follows a skipped step', declined: 'not allowed', 'skip-writes': '--skip-writes', remote: 'remote address' },
   },
   tr: {
@@ -21,6 +23,8 @@ const LABELS = {
     pasteTitle: 'Smoke ({date}, {pass}/{run}; guided-smoke {walk})', notRun: 'koşulmadı', results: { completed: 'tamamlandı', stopped: 'kullanıcı durdurdu', error: 'hatayla bitti', running: 'sürüyor ya da yarıda kesildi' },
     against: 'otomatik kontrol ✖ iken ✔ verildi', againstSummary: '⚠ {count} adım otomatik kontrol ✖ iken ✔ aldı: {steps}.',
     againstShort: 'otomatik kontrol ✖',
+    byAuto: 'kendiliğinden', autoSummary: 'Geçen adımların {count} tanesi kendiliğinden geçti (--auto).',
+    recordings: 'Kayıtlar', recordingsNote: 'ekranda görüneni, çerezleri ve sayfa verisini içerir: bu makinede tut, iş kaydına ekleme',
     pass: 'geçti', diff: 'farklı', skip: 'atlandı', none: 'koşulmadı', reasons: { filter: 'filtre', 'follows-skip': 'atlanan adımı izliyor', declined: 'izin verilmedi', 'skip-writes': '--skip-writes', remote: 'uzak adres' },
   },
 };
@@ -90,8 +94,12 @@ function build(meta, events, prev) {
   lines.push(`- **${L.base}:** ${meta.base}`);
   lines.push(`- **${L.result}:** ${L.results[meta.result] || meta.result}${meta.error ? ` — ${meta.error}` : ''}`);
   if (meta.filter) lines.push(`- **${L.filter}:** ${meta.filter}`);
+  const recordings = [...(meta.traces || []), ...(meta.videos || [])];
+  if (recordings.length) lines.push(`- **${L.recordings}:** ${recordings.map(r => `[${r}](${r})`).join(' · ')} (${L.recordingsNote})`);
   lines.push('', `## ${L.summary}`, '');
   lines.push(`${ICON.pass} ${c.pass} ${L.pass} · ${ICON.diff} ${c.diff} ${L.diff} · ${ICON.skip} ${c.skip} ${L.skip} · ${ICON.none} ${c.none} ${L.none}`);
+  const byAuto = [...states.values()].filter(e => e.answer === 'pass' && e.answeredBy === 'auto').length;
+  if (byAuto) lines.push('', L.autoSummary.replace('{count}', byAuto));
   if (against.length) lines.push('', L.againstSummary.replace('{count}', against.length).replace('{steps}', against.join(', ')));
 
   lines.push('', `## ${L.steps}`, '');
@@ -102,7 +110,7 @@ function build(meta, events, prev) {
     const title = (e && e.title) || (meta.titles && meta.titles[n - 1]) || '';
     let outcome = `${ICON.none} ${L.notRun}`;
     if (e && e.answer !== 'stop') {
-      outcome = `${ICON[e.answer]} ${L[e.answer]}${e.reason ? ` (${L.reasons[e.reason] || e.reason})` : ''}`;
+      outcome = `${ICON[e.answer]} ${L[e.answer]}${e.reason ? ` (${L.reasons[e.reason] || e.reason})` : ''}${e.answeredBy === 'auto' ? ` (${L.byAuto})` : ''}`;
     } else if (e && e.answer === 'stop') {
       outcome = `${ICON.stop} ${L.notRun}`;
     }
@@ -133,7 +141,7 @@ function build(meta, events, prev) {
     const e = states.get(n);
     if (!e || e.answer === 'stop') continue;
     if (e.answer === 'skip' && e.reason === 'filter') continue;
-    lines.push(`${ICON[e.answer]} ${e.title}${e.answer === 'pass' && e.againstCheck ? ` (⚠ ${L.againstShort})` : ''}${e.note ? ` — ${e.note}` : ''}`);
+    lines.push(`${ICON[e.answer]} ${e.title}${e.answeredBy === 'auto' ? ` (${L.byAuto})` : ''}${e.answer === 'pass' && e.againstCheck ? ` (⚠ ${L.againstShort})` : ''}${e.note ? ` — ${e.note}` : ''}`);
   }
   lines.push(`${L.measured}: ${duration(meta.measuredSeconds, lang)}`);
   lines.push('```', '');

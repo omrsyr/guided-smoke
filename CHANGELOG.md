@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **`--auto`.** A step whose automatic check passed without plan warnings goes on by itself after a 3-second
+  countdown in the panel; **⏸ Wait** or any button keeps it for the user. Failed or missing checks, permitted steps
+  and value-box waits always wait. Such steps are recorded with `answeredBy: "auto"` and read "✔ passed (by
+  itself)" in the report and the paste block; the closing panel counts them.
+- **`--panel left|right[,min]`.** The panel's corner (the value box takes the other one) and whether it starts
+  minimized; the user's own minimize choice carries over to the next panels.
+- **`--video`.** The walk is recorded as `video/walk.webm` in the walk folder; while recording, every field of the
+  value box shows dots.
+- **`--trace`.** A Playwright trace after the sign-in, in parts (`trace-1.zip`, …): each part is its own recording,
+  ending when the value box appears and starting again when the plan removes it, so the box's values and the requests
+  sent with them are in no part (a test unzips the parts to check). The report links the recordings and says to keep
+  them on this machine; safety.md explains what they hold.
 - **Node.js 20 or newer** (was 18): playwright-core 1.63 needs it. Older versions get a clear message and exit
   code 3 before anything loads.
 - **Tested on Windows, macOS and Linux.** GitHub Actions runs `setup`, the engine's tests and the headless demo in

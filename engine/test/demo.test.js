@@ -282,3 +282,135 @@ test('a value box gone from the page is drawn again and waited for', { skip, tim
     fs.rmSync(walkDir, { recursive: true, force: true });
   }
 });
+
+test('--auto passes only a step whose check passed, after a countdown the user can hold', { skip, timeout: 90000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  let held = false;
+  const ok = async () => [true, 'ok'];
+  const plan = {
+    id: 'auto', start: '/orders/1001', ready: '#order-card', login: '/login',
+    steps: [
+      { title: 'Goes on', did: 'x', expect: ['x'], run: async () => {}, check: ok },
+      { title: 'Held', did: 'x', expect: ['x'], run: async () => {}, check: ok },
+      { title: 'Failed', did: 'x', expect: ['x'], run: async () => {}, check: async () => [false, 'no'] },
+      { title: 'No check', did: 'x', expect: ['x'], run: async () => {} },
+    ],
+  };
+  try {
+    const { counts } = await autoWalk({
+      playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn, letAuto: true, options: { auto: true },
+      onPanel: async (page, { title }) => {
+        if (title === 'Held' && !held) { held = true; await page.locator('#__guided_smoke [data-guided-smoke-hold]').click(); }
+      },
+    });
+    const by = readEvents(walkDir).map(e => [e.title, e.answer, e.answeredBy || 'user']);
+    assert.deepStrictEqual(by, [['Goes on', 'pass', 'auto'], ['Held', 'pass', 'user'], ['Failed', 'pass', 'user'], ['No check', 'pass', 'user']]);
+    assert.strictEqual(counts.auto, 1);
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+test('--panel left,min: the panel starts minimized at the left, the box goes right, opening it carries over', { skip, timeout: 60000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const seen = {};
+  const plan = {
+    id: 'panel', start: '/orders/1001', ready: '#order-card', login: '/login',
+    steps: [
+      { title: 'First', did: 'x', expect: ['x'], run: async ({ secretBox }) => { await secretBox({ fields: [{ name: 'token', label: 'Token' }] }); } },
+      { title: 'Second', did: 'x', expect: ['x'], run: async ({ secretBox }) => { await secretBox(null); } },
+    ],
+  };
+  try {
+    await autoWalk({
+      playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn, options: { panel: { side: 'left', min: true } },
+      onPanel: async (page, { title }) => {
+        if (seen[title] || !['First', 'Second'].includes(title)) return;
+        seen[title] = await page.evaluate(() => {
+          const panel = document.getElementById('__guided_smoke');
+          const box = document.getElementById('__guided_smoke_box');
+          return { left: panel.style.left, minimized: !panel.querySelector('[data-guided-smoke-answer]').offsetParent,
+            boxRight: box ? box.style.right : null };
+        });
+      },
+    });
+    assert.deepStrictEqual(seen, {
+      First: { left: '16px', minimized: true, boxRight: '16px' },
+      Second: { left: '16px', minimized: false, boxRight: null },
+    });
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+// Every file in a zip, inflated: enough of the format to look inside a Playwright trace.
+function unzip(file) {
+  const zlib = require('zlib');
+  const buf = fs.readFileSync(file);
+  const end = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const files = [];
+  let p = buf.readUInt32LE(end + 16);
+  for (let i = buf.readUInt16LE(end + 10); i > 0; i--) {
+    const method = buf.readUInt16LE(p + 10);
+    const size = buf.readUInt32LE(p + 20);
+    const [nameLen, extraLen, commentLen] = [buf.readUInt16LE(p + 28), buf.readUInt16LE(p + 30), buf.readUInt16LE(p + 32)];
+    const local = buf.readUInt32LE(p + 42);
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const data = buf.subarray(start, start + size);
+    files.push({ name: buf.toString('utf8', p + 46, p + 46 + nameLen), data: method === 8 ? zlib.inflateRawSync(data) : data });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return files;
+}
+
+test('--trace leaves the value box out of every part, --video is saved, and the box shows dots while recording', { skip, timeout: 90000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const seen = {};
+  const typed = { email: 'box-user@example.test', password: 'box-secret-42' };
+  const plan = {
+    id: 'record', start: '/orders/1001', ready: '#order-card', login: '/login',
+    steps: [
+      { title: 'Before', did: 'x', expect: ['x'], run: async ({ page, mark }) => { await mark(page.locator('#order-card h1')); } },
+      { title: 'Box', did: 'x', expect: ['x'], run: async ({ secretBox, inPage, state }) => {
+        await secretBox({ fields: [{ name: 'email', label: 'E-mail', type: 'email' }, { name: 'password', label: 'Password', secret: true }] });
+        state.http = await inPage(async ({ fields }) => (await fetch('/api/login', { method: 'POST', body: JSON.stringify(fields) })).status);
+      }, check: async ({ state }) => [state.http === 401, `http ${state.http}`] },
+      { title: 'After', did: 'x', expect: ['x'], run: async ({ page, secretBox, mark }) => {
+        await secretBox(null);
+        await mark(page.locator('#calls'));
+      } },
+    ],
+  };
+  try {
+    const { meta } = await autoWalk({
+      playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn, options: { trace: true, video: true },
+      // Values that appear nowhere on the page (the demo's own account is printed on it): the API refuses them.
+      box: typed,
+      onPanel: async (page, { title }) => {
+        if (title === 'Box' && !seen.dots) {
+          seen.dots = await page.evaluate(() => getComputedStyle(document.querySelector('[data-guided-smoke-field="email"]')).webkitTextSecurity);
+        }
+      },
+    });
+    assert.strictEqual(meta.result, 'completed');
+    assert.ok(readEvents(walkDir)[1].auto.ok, 'the API call went through');
+    assert.strictEqual(seen.dots, 'disc');
+    assert.deepStrictEqual(meta.traces, ['trace-1.zip', 'trace-2.zip']);
+    for (const part of meta.traces) {
+      const files = unzip(path.join(walkDir, part));
+      assert.ok(files.some(f => f.name.endsWith('.trace')), `${part} is a trace`);
+      const text = files.map(f => f.data.toString('latin1')).join('\n');
+      for (const value of Object.values(typed)) assert.ok(!text.includes(value), `${part} holds ${value}`);
+    }
+    assert.deepStrictEqual(meta.videos, ['video/walk.webm']);
+    assert.ok(fs.statSync(path.join(walkDir, 'video', 'walk.webm')).size > 1000);
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});

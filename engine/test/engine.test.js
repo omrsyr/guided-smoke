@@ -178,6 +178,25 @@ test('a pass over a failed automatic check is flagged in the summary, the note a
   assert.match(markdown, /\n✔ b\n/);
 });
 
+test('the report marks steps passed by --auto and links recordings with a warning', () => {
+  const meta = { totalSteps: 2, titles: ['a', 'b'], lang: 'en', walkId: 'r-1', planId: 'r', readyAt: '2026-11-03T08:00:00Z',
+    endedAt: '2026-11-03T08:00:10Z', measuredSeconds: 10, result: 'completed', browser: 'chrome', browserSource: 'requested',
+    base: 'http://localhost', auto: true, traces: ['trace-1.zip', 'trace-2.zip'], videos: ['video/walk.webm'] };
+  const { markdown } = report.build(meta, [{ n: 1, title: 'a', answer: 'pass', answeredBy: 'auto' }, { n: 2, title: 'b', answer: 'pass' }], null);
+  assert.match(markdown, /\| 1 \| a \| ✔ passed \(by itself\) \|/);
+  assert.match(markdown, /\| 2 \| b \| ✔ passed \|/);
+  assert.match(markdown, /1 of the passed steps went on by themselves \(--auto\)\./);
+  assert.match(markdown, /\n✔ a \(by itself\)\n✔ b\n/);
+  assert.match(markdown, /Recordings:\*\* \[trace-1\.zip\]\(trace-1\.zip\) · \[trace-2\.zip\]\(trace-2\.zip\) · \[video\/walk\.webm\]\(video\/walk\.webm\) \(.*do not attach/);
+});
+
+test('--panel takes left or right and/or min, nothing else', () => {
+  for (const bad of ['up', 'left,right', 'min,max', ',']) assert.strictEqual(cli('run', '6655', '--panel', bad).status, 2, bad);
+  assert.strictEqual(cli('run', '6655', '--panel').status, 2, 'a value is required');
+  assert.strictEqual(cli('demo', '--panel', 'up').status, 2);
+  assert.match(cli('run', '6655', '--panel', 'left,min').stderr, /No address/, 'a good value passes on to the next check');
+});
+
 test('the report counts final answers, compares with the previous walk and carries a paste block', () => {
   const meta1 = store.readJson(path.join(store.walkDir(P, '6655-machine-expiry-1'), 'walk.json'));
   const meta2 = { ...meta1, walkId: '6655-machine-expiry-2', workItem: '6655' };
