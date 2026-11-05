@@ -1,0 +1,8 @@
+{
+  "name": "omrsyr",
+  "description": "Claude Code plugins by Ömer Soyer",
+  "owner": { "name": "Ömer Soyer", "url": "https://github.com/omrsyr" },
+  "plugins": [
+    { "name": "guided-smoke", "source": "./" }
+  ]
+}

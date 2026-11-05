@@ -41,6 +41,20 @@ koşusu. Edge de aynı yolla sürülür, ancak GitHub'ın makinelerinde yalnız 
 
 ## Kurulum
 
+İki yol var; skill aynıdır. İkisi birden varsa plugin, klonun önüne geçer.
+
+**Plugin olarak**, güncelleme tek komutla:
+
+```bash
+claude plugin marketplace add omrsyr/guided-smoke
+claude plugin install guided-smoke@omrsyr
+```
+
+Session içinde iki adım tektir: `/plugin install guided-smoke --marketplace omrsyr/guided-smoke`
+(Claude Code 2.1.275 ve sonrası). Yeni sürüm `claude plugin update guided-smoke@omrsyr` ile gelir.
+
+**Skill klasörü olarak**, güncelleme `git pull` ile:
+
 ```bash
 git clone https://github.com/omrsyr/guided-smoke ~/.claude/skills/guided-smoke
 ```
@@ -48,13 +62,14 @@ git clone https://github.com/omrsyr/guided-smoke ~/.claude/skills/guided-smoke
 Windows (PowerShell): `git clone https://github.com/omrsyr/guided-smoke "$env:USERPROFILE\.claude\skills\guided-smoke"`
 
 Yeni bir Claude Code session'ı aç. İlk koşu `playwright-core`'u (birkaç MB, npm'den) veri klasörüne kurmak için izin
-ister; skill klasörüne değil. İstersen kendin de kurabilirsin: `node ~/.claude/skills/guided-smoke/engine/run.js setup`.
+ister; skill klasörüne değil. İstersen kendin de kurabilirsin: `node <klasör>/engine/run.js setup`; klasör, klonda
+`~/.claude/skills/guided-smoke`, plugin'de `claude plugin list` çıktısındaki `Read from` yoludur.
 
 ## Dene
 
 ```bash
 node ~/.claude/skills/guided-smoke/engine/run.js setup     # bir kez: playwright-core veri klasörüne
-node ~/.claude/skills/guided-smoke/engine/run.js demo
+node ~/.claude/skills/guided-smoke/engine/run.js demo      # plugin'de: aynı iki komut, plugin'in klasöründe
 ```
 
 127.0.0.1'de küçük bir demo uygulaması açılır ve tarayıcında 14 adımlık bir koşu başlar: sayfada yazan hesapla giriş

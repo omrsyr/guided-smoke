@@ -332,4 +332,23 @@ test('init creates a plan from the template and refuses ids that read as walks',
   assert.strictEqual(cli('init', '8000-new-screen').status, 2, 'existing plan needs --force');
 });
 
+// The repository is also a Claude Code plugin and its own marketplace. A plugin.json version that lags behind keeps
+// users on the old copy (claude plugin update sees nothing new), so the three version strings move together.
+test('the plugin manifest, the marketplace entry and the version strings agree', () => {
+  const root = path.join(__dirname, '..', '..');
+  const read = f => fs.readFileSync(path.join(root, f), 'utf8');
+  const plugin = JSON.parse(read('.claude-plugin/plugin.json'));
+  const market = JSON.parse(read('.claude-plugin/marketplace.json'));
+  const skillVersion = /^\s+version: "([^"]+)"$/m.exec(read('SKILL.md'))[1];
+  const runVersion = /^const VERSION = '([^']+)';$/m.exec(read('engine/run.js'))[1];
+  assert.strictEqual(plugin.version, skillVersion, 'plugin.json and SKILL.md');
+  assert.strictEqual(plugin.version, runVersion, 'plugin.json and run.js');
+  assert.strictEqual(plugin.name, 'guided-smoke');
+  assert.ok(!plugin.skills && fs.existsSync(path.join(root, 'SKILL.md')), 'SKILL.md at the plugin root loads as the one skill');
+  assert.deepStrictEqual(market.plugins.map(p => [p.name, p.source]), [['guided-smoke', './']]);
+  assert.strictEqual(market.name, 'omrsyr');
+  assert.ok(market.owner && market.owner.name, 'marketplace owner');
+  assert.ok(!fs.existsSync(path.join(root, 'CLAUDE.md')), 'a CLAUDE.md at the plugin root is never loaded and only draws a warning');
+});
+
 test.after(() => fs.rmSync(home, { recursive: true, force: true }));

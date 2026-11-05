@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Install as a plugin.** The repository is now a Claude Code plugin and its own marketplace
+  (`.claude-plugin/plugin.json` and `marketplace.json`): `claude plugin marketplace add omrsyr/guided-smoke`, then
+  `claude plugin install guided-smoke@omrsyr`; `claude plugin update guided-smoke@omrsyr` brings a new version. The
+  clone into `~/.claude/skills` keeps working, and when both are present the plugin takes precedence. A test keeps
+  the plugin's version in step with SKILL.md and run.js.
+
 ## 1.0.1 — 2026-11-05
 
 - **A download in the second walk of a kept profile crashed Chrome.** Chrome keeps downloads in the profile's

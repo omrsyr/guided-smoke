@@ -41,6 +41,20 @@ headless in Chrome. Edge is driven the same way, but the hosted runners only tes
 
 ## Install
 
+Two ways; the skill is the same, and when both are present the plugin takes precedence over the clone.
+
+**As a plugin**, updated by one command:
+
+```bash
+claude plugin marketplace add omrsyr/guided-smoke
+claude plugin install guided-smoke@omrsyr
+```
+
+Inside a session the two steps are one: `/plugin install guided-smoke --marketplace omrsyr/guided-smoke`
+(Claude Code 2.1.275 or later). A new version arrives with `claude plugin update guided-smoke@omrsyr`.
+
+**As a skill folder**, updated by `git pull`:
+
 ```bash
 git clone https://github.com/omrsyr/guided-smoke ~/.claude/skills/guided-smoke
 ```
@@ -48,13 +62,14 @@ git clone https://github.com/omrsyr/guided-smoke ~/.claude/skills/guided-smoke
 On Windows (PowerShell): `git clone https://github.com/omrsyr/guided-smoke "$env:USERPROFILE\.claude\skills\guided-smoke"`
 
 Start a new Claude Code session. The first run asks to install `playwright-core` (a few MB, from npm) into the data
-folder — not into the skill folder. You can also do it yourself: `node ~/.claude/skills/guided-smoke/engine/run.js setup`.
+folder — not into the skill folder. You can also do it yourself: `node <folder>/engine/run.js setup`, where the folder
+is `~/.claude/skills/guided-smoke` for the clone, or the `Read from` path that `claude plugin list` prints for the plugin.
 
 ## Try it
 
 ```bash
 node ~/.claude/skills/guided-smoke/engine/run.js setup     # once: playwright-core into the data folder
-node ~/.claude/skills/guided-smoke/engine/run.js demo
+node ~/.claude/skills/guided-smoke/engine/run.js demo      # from the plugin: the same two commands in its folder
 ```
 
 A small demo application starts on 127.0.0.1 and a 14-step walk opens in your browser: sign in with the account shown
