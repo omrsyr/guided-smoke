@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 — 2026-11-05
 
 - **`--auto`.** A step whose automatic check passed without plan warnings goes on by itself after a 3-second
   countdown in the panel; **⏸ Wait** or any button keeps it for the user. Failed or missing checks, permitted steps
