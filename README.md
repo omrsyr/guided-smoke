@@ -2,7 +2,7 @@
 
 [![test](https://github.com/omrsyr/guided-smoke/actions/workflows/test.yml/badge.svg)](https://github.com/omrsyr/guided-smoke/actions/workflows/test.yml)
 
-**A smoke test you can follow.** A Claude Code skill that walks you through a change in a real browser: Playwright
+**A smoke or acceptance test you can follow: a UAT walkthrough.** A Claude Code skill that walks you through a change in a real browser: Playwright
 performs each step, a panel on the page tells you **what was done** and **what you should see** (outlined in orange),
 and nothing moves on until you click **✔ Correct, continue**.
 

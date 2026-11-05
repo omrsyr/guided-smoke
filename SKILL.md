@@ -1,12 +1,13 @@
 ---
 name: guided-smoke
 description: >
-  Human-in-the-loop smoke test in a real browser. Playwright performs each step while a panel on the page explains what
-  was done and what the user should see; nothing moves on until the user clicks "Correct, continue". Plans and walks
-  are kept with short ids (6655, 6655-2) so a smoke can be re-run after a fix and reported. Use when the user invokes
-  guided-smoke or explicitly asks to run a smoke / user smoke / acceptance walk-through of a change ("smoke koş",
-  "smoke testi", "kullanıcı smoke'u", "Playwright ile smoke", "yönlendirmeli smoke"). Never start it on your own; at
-  most suggest it once when a task reaches its smoke step.
+  Human-in-the-loop smoke and acceptance test (a UAT walkthrough) in a real browser. Playwright performs each step
+  while a panel on the page explains what was done and what the user should see; nothing moves on until the user
+  clicks "Correct, continue". Plans and walks are kept with short ids (6655, 6655-2) so a smoke can be re-run after a
+  fix and reported. Use when the user invokes guided-smoke or explicitly asks to run a smoke / user smoke /
+  acceptance test / UAT / walkthrough of a change ("smoke koş", "smoke testi", "kullanıcı smoke'u", "kabul testi",
+  "Playwright ile smoke", "yönlendirmeli smoke"). Never start it on your own; at most suggest it once when a task
+  reaches its smoke step.
 license: MIT
 compatibility: >
   Claude Code (or any agent with shell access) on Windows, macOS or Linux; Node.js 20+; Google Chrome or Microsoft

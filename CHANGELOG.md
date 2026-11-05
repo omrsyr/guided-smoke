@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The description now also says "acceptance test" and "UAT walkthrough", the words people search for; the trigger
+  list gains "acceptance test / UAT / walkthrough" and "kabul testi". No change in behaviour.
+
 ## 1.1.0 — 2026-11-05
 
 - **Install as a plugin.** The repository is now a Claude Code plugin and its own marketplace

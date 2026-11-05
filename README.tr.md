@@ -2,7 +2,7 @@
 
 [![test](https://github.com/omrsyr/guided-smoke/actions/workflows/test.yml/badge.svg)](https://github.com/omrsyr/guided-smoke/actions/workflows/test.yml)
 
-**Takip edebileceğin bir smoke testi.** Bir değişikliği gerçek bir tarayıcıda sana adım adım gösteren Claude Code
+**Takip edebileceğin bir smoke ya da kabul testi (UAT turu).** Bir değişikliği gerçek bir tarayıcıda sana adım adım gösteren Claude Code
 skill'i: Playwright her adımı kendisi yapar, sayfadaki panel **ne yapıldığını** ve **ne görmen gerektiğini** yazar
 (ilgili yer turuncu çerçeveyle işaretlenir); sen **✔ Doğru, devam** demeden sonraki adıma geçilmez.
 
