@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 — 2026-11-05
 
 - **Install as a plugin.** The repository is now a Claude Code plugin and its own marketplace
   (`.claude-plugin/plugin.json` and `marketplace.json`): `claude plugin marketplace add omrsyr/guided-smoke`, then
