@@ -20,8 +20,9 @@ const playwright = (() => {
 })();
 const chosen = (() => { try { return browser.choose(process.env.GUIDED_SMOKE_BROWSER); } catch { return null; } })();
 const skip = !playwright ? 'playwright-core is not installed (node engine/run.js setup)' : !chosen ? 'no Chrome or Edge' : false;
+const noVideo = skip || (!browser.videoReady(store.runtimeDir()) && 'ffmpeg is not installed (node engine/run.js setup --video)');
 // CI sets GUIDED_SMOKE_REQUIRE_BROWSER: there a skipped browser test would hide a broken setup.
-if (skip && process.env.GUIDED_SMOKE_REQUIRE_BROWSER) throw new Error(`Browser tests required but cannot run: ${skip}.`);
+if (noVideo && process.env.GUIDED_SMOKE_REQUIRE_BROWSER) throw new Error(`Browser tests required but cannot run: ${noVideo}.`);
 
 const signIn = {
   when: '#user',
@@ -367,7 +368,25 @@ function unzip(file) {
   return files;
 }
 
-test('--trace leaves the value box out of every part, --video is saved, and the box shows dots while recording', { skip, timeout: 90000 }, async () => {
+test('--video without ffmpeg stops before the browser opens and names setup --video', { skip: !playwright && 'playwright-core is not installed (node engine/run.js setup)' }, () => {
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-ffmpeg-'));
+  const walks = store.walksDir('guided-smoke-demo');
+  const before = fs.existsSync(walks) ? fs.readdirSync(walks) : [];
+  try {
+    const env = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: empty };
+    assert.strictEqual(require('child_process').spawnSync(process.execPath, ['-e',
+      `process.exit(require(${JSON.stringify(require.resolve('../browser'))}).videoReady(${JSON.stringify(store.runtimeDir())}) ? 0 : 1)`],
+    { env }).status, 1, 'no ffmpeg in an empty Playwright folder');
+    const r = require('child_process').spawnSync(process.execPath, [path.join(__dirname, '..', 'run.js'), 'demo', '--video'], { env, encoding: 'utf8' });
+    assert.strictEqual(r.status, 3, r.stderr);
+    assert.match(r.stderr, /setup --video/);
+    assert.deepStrictEqual(fs.existsSync(walks) ? fs.readdirSync(walks) : [], before, 'no walk folder');
+  } finally {
+    fs.rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+test('--trace leaves the value box out of every part, --video is saved, and the box shows dots while recording', { skip: noVideo, timeout: 90000 }, async () => {
   const app = await server.start({ lang: 'en' });
   const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
   const seen = {};

@@ -32,7 +32,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
-      - run: node engine/run.js setup
+      - run: node engine/run.js setup --video
       - run: node engine/run.js doctor
       - run: node --test engine/test/engine.test.js
       - run: node --test engine/test/demo.test.js

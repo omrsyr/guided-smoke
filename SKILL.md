@@ -62,7 +62,7 @@ Flags (order free; unknown flags and bad values are refused with a clear message
 | `--fresh` | Throw-away browser profile for this walk (sign in again, nothing kept) |
 | `--auto` | A step whose automatic check passed without plan warnings goes on by itself after a 3 s countdown (⏸ Wait or any button stops it). Failed or missing checks, permitted steps and value-box waits always wait. The report marks such steps "by itself" |
 | `--panel left|right[,min]` | Panel corner (the value box takes the other one); `min` starts it minimized. The user's minimize choice carries over |
-| `--video` | Record the walk as `video/walk.webm` in the walk folder |
+| `--video` | Record the walk as `video/walk.webm` in the walk folder. Needs Playwright's ffmpeg once (`setup --video`, about 4 MB; ask first) |
 | `--trace` | Record a Playwright trace after the sign-in, in parts (`trace-1.zip`, …) that leave out the value box. Open with `npx playwright show-trace` |
 | `--reset-login` | Delete this project's saved sign-in (`node engine/run.js reset-login`) |
 
@@ -73,6 +73,7 @@ All work goes through `node <skill-dir>/engine/run.js` (`<skill-dir>` is this fi
 ```text
 node run.js doctor                    data folder, project, chosen browser, runtime — run this first
 node run.js setup                     install playwright-core once (asks npm; get the user's OK first)
+node run.js setup --video             also fetch Playwright's ffmpeg for --video (about 4 MB; get the user's OK first)
 node run.js init <plan-id> [--title T] [--work-item N]   create plans/<plan-id>/steps.js from the template
 node run.js run <ref|file.js> [flags] run a walk (start it in the background and wait for it to finish); a file is
                                       linked into the plans, --force replaces another plan with the same id

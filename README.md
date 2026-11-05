@@ -79,7 +79,8 @@ Say "run a smoke for this" or type:
 Useful flags: `--browser chrome|edge`, `--base https://localhost:5001`, `--pace slow|normal|fast`, `--from 5`,
 `--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (default: your system's), `--skip-writes`, `--fresh`,
 `--auto` (a step whose check passed goes on by itself after 3 s), `--panel left,min` (corner, start minimized),
-`--video`, `--trace` (recordings in the walk folder; the value box is left out of the trace). See [SKILL.md](SKILL.md).
+`--video`, `--trace` (recordings in the walk folder; the value box is left out of the trace; `--video` needs
+`run.js setup --video` once, about 4 MB). See [SKILL.md](SKILL.md).
 
 ## Sign-in and data
 

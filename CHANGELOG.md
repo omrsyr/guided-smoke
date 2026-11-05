@@ -9,7 +9,8 @@
 - **`--panel left|right[,min]`.** The panel's corner (the value box takes the other one) and whether it starts
   minimized; the user's own minimize choice carries over to the next panels.
 - **`--video`.** The walk is recorded as `video/walk.webm` in the walk folder; while recording, every field of the
-  value box shows dots.
+  value box shows dots. It needs Playwright's ffmpeg, fetched once by the new `setup --video` (about 4 MB); without it
+  `--video` stops before the browser opens and says so, and `doctor` shows whether video is ready.
 - **`--trace`.** A Playwright trace after the sign-in, in parts (`trace-1.zip`, …): each part is its own recording,
   ending when the value box appears and starting again when the plan removes it, so the box's values and the requests
   sent with them are in no part (a test unzips the parts to check). The report links the recordings and says to keep

@@ -5,7 +5,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const CHANNELS = { chrome: 'chrome', edge: 'msedge' };
 
@@ -70,4 +70,28 @@ function choose(requested) {
   throw new Error('Neither Google Chrome nor Microsoft Edge is installed. Install one of them and run again.');
 }
 
-module.exports = { choose, systemDefault, installed, CHANNELS };
+// --video needs Playwright's own ffmpeg build, the one download beside playwright-core, fetched only on request
+// (setup --video). Playwright knows where it goes (PLAYWRIGHT_BROWSERS_PATH or its cache folder), so ask it instead of
+// repeating its rules; a finished download leaves INSTALLATION_COMPLETE in that folder.
+function playwrightCli(runtimeDir) {
+  return path.join(path.dirname(require.resolve('playwright-core/package.json', { paths: [runtimeDir] })), 'cli.js');
+}
+
+function ffmpegFolder(runtimeDir) {
+  const r = spawnSync(process.execPath, [playwrightCli(runtimeDir), 'install', '--dry-run', 'ffmpeg'], { encoding: 'utf8' });
+  const m = /Install location:\s*(.+)/.exec(r.stdout || '');
+  return m ? m[1].trim() : null;
+}
+
+function videoReady(runtimeDir) {
+  try {
+    const dir = ffmpegFolder(runtimeDir);
+    return !!dir && fs.existsSync(path.join(dir, 'INSTALLATION_COMPLETE'));
+  } catch { return false; }
+}
+
+function installFfmpeg(runtimeDir) {
+  return spawnSync(process.execPath, [playwrightCli(runtimeDir), 'install', 'ffmpeg'], { stdio: 'inherit' }).status === 0;
+}
+
+module.exports = { choose, systemDefault, installed, CHANNELS, ffmpegFolder, videoReady, installFfmpeg };

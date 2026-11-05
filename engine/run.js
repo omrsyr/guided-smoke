@@ -2,7 +2,7 @@
 'use strict';
 // guided-smoke engine CLI. Claude calls this; the canonical user-facing forms are described in SKILL.md.
 //
-//   node run.js setup                                  install playwright-core into the data folder (once)
+//   node run.js setup [--video]                        install playwright-core into the data folder (once); --video adds ffmpeg
 //   node run.js doctor                                 data folder, project, browser, runtime
 //   node run.js init <plan-id> [--title T] [--work-item N] [--force]
 //   node run.js run <plan|walk|work-item|file.js> [flags] [--force]
@@ -30,7 +30,7 @@ const EXIT = { ok: 0, error: 1, usage: 2, runtime: 3, resolve: 4 };
 
 const FLAGS = {
   common: { project: 'value', json: 'bool', help: 'bool' },
-  setup: {},
+  setup: { video: 'bool' },
   doctor: { browser: 'value' },
   paths: {},
   init: { title: 'value', 'work-item': 'value', force: 'bool' },
@@ -89,7 +89,7 @@ function loadPlaywright() {
   }
 }
 
-function setup() {
+function setup(flags) {
   const dir = store.runtimeDir();
   fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(path.join(dir, 'package.json'))) {
@@ -99,6 +99,9 @@ function setup() {
   const r = spawnSync(`npm install playwright-core@${PLAYWRIGHT_VERSION} --no-audit --no-fund`, { cwd: dir, stdio: 'inherit', shell: true });
   if (r.status !== 0) throw Object.assign(new Error('npm install failed.'), { exit: EXIT.runtime });
   console.log(`playwright-core ${PLAYWRIGHT_VERSION} installed in ${dir}`);
+  if (!flags.video) return;
+  if (!browser.installFfmpeg(dir)) throw Object.assign(new Error('Installing ffmpeg failed.'), { exit: EXIT.runtime });
+  console.log(`ffmpeg for --video installed in ${browser.ffmpegFolder(dir)}`);
 }
 
 // A plan kept elsewhere (a file given to run, the demo) is linked into the project's plans by a one-line pointer, not
@@ -212,7 +215,7 @@ async function main() {
   }
   const project = flags.project ? store.safeName(flags.project) : store.detectProject();
 
-  if (command === 'setup') { setup(); return EXIT.ok; }
+  if (command === 'setup') { setup(flags); return EXIT.ok; }
 
   if (command === 'paths') {
     const root = store.dataRoot();
@@ -231,6 +234,7 @@ async function main() {
       locale: systemLocale(),
       systemDefault: browser.systemDefault(), chrome: browser.installed('chrome'), edge: browser.installed('edge'),
       browser: chosen, browserError,
+      video: runtime !== 'missing' && browser.videoReady(store.runtimeDir()) ? 'ready' : 'missing (node run.js setup --video)',
     };
     out(flags, data, Object.entries(data).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n'));
     return runtime === 'missing' ? EXIT.runtime : EXIT.ok;
@@ -382,6 +386,9 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
 
   const chosen = browser.choose(flags.browser);
   const playwright = loadPlaywright();
+  if (flags.video && !browser.videoReady(store.runtimeDir())) {
+    throw Object.assign(new Error("--video needs Playwright's ffmpeg (about 4 MB, from Playwright's download servers). Install it once: node run.js setup --video"), { exit: EXIT.runtime });
+  }
 
   const walkId = store.nextWalkId(project, planId);
   const walkDir = store.walkDir(project, walkId);

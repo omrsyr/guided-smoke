@@ -54,6 +54,8 @@ steps too (see writing-steps rule 8).
 ## Recordings (`--video`, `--trace`)
 
 - Both are off unless asked for, and both stay in the walk folder.
+- `--video` needs Playwright's ffmpeg build (about 4 MB from Playwright's download servers, into Playwright's own
+  folder). It is fetched only by `setup --video`, with the user's OK; a walk never downloads it.
 - A **video** shows the whole screen of the walk, the sign-in page included (the password field shows dots; the user
   name is visible). While it records, every field of the value box shows dots.
 - A **trace** starts after the sign-in. Each part is a separate recording that ends when the value box appears and
