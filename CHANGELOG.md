@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.1 — 2026-11-05
 
 - **A download in the second walk of a kept profile crashed Chrome.** Chrome keeps downloads in the profile's
   browsing history; with the earlier walk's download in it (a file Playwright had already deleted), Chrome 153

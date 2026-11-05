@@ -13,7 +13,7 @@ compatibility: >
   Edge installed; the application under test reachable from this machine.
 metadata:
   author: omrsyr
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # guided-smoke
