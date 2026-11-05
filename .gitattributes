@@ -1,0 +1,4 @@
+# Text files are stored and checked out with LF on every platform; Windows editors and tools that write CRLF are
+# normalized on commit.
+* text=auto eol=lf
+*.png binary

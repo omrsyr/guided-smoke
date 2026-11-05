@@ -351,4 +351,20 @@ test('the plugin manifest, the marketplace entry and the version strings agree',
   assert.ok(!fs.existsSync(path.join(root, 'CLAUDE.md')), 'a CLAUDE.md at the plugin root is never loaded and only draws a warning');
 });
 
+// Windows tools keep writing CRLF; .gitattributes normalizes commits, and this catches a working copy before one.
+test('the repository\'s text files use LF line endings', () => {
+  const root = path.join(__dirname, '..', '..');
+  const crlf = [];
+  const scan = dir => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === '.git' || entry.name === 'node_modules') continue;
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) scan(file);
+      else if (!/\.(png|jpg|webm|zip)$/.test(entry.name) && fs.readFileSync(file).includes('\r')) crlf.push(path.relative(root, file));
+    }
+  };
+  scan(root);
+  assert.deepStrictEqual(crlf, []);
+});
+
 test.after(() => fs.rmSync(home, { recursive: true, force: true }));
