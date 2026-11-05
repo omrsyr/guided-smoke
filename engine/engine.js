@@ -419,6 +419,16 @@ function disablePasswordSaving(profile) {
   fs.writeFileSync(file, JSON.stringify(prefs));
 }
 
+// Chrome keeps downloads in the profile's browsing history. With an earlier walk's download in it (a file Playwright
+// has since deleted), Chrome 153 crashes, or hangs headless, at the next walk's download. A smoke profile needs no
+// history; the sign-in is kept in Network/Cookies. A file that cannot be removed belongs to a browser still open on
+// the profile, and the launch then reports that itself.
+function dropHistory(profile) {
+  for (const name of ['History', 'History-journal']) {
+    try { fs.rmSync(path.join(profile, 'Default', name), { force: true }); } catch { /* profile in use */ }
+  }
+}
+
 // The heading above `expect`: it mentions the orange outline only when the step drew one. A step that checks the
 // database or waits for a job has nothing on screen to outline.
 function expectLabel(t, marked) {
@@ -492,7 +502,14 @@ async function walk(o) {
 
   const profile = options.fresh ? fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-')) : o.profile;
   fs.mkdirSync(profile, { recursive: true });
+  // A crashed browser's helper processes can hold the profile a moment longer.
+  const removeProfile = () => fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  const dropFreshProfile = () => {
+    if (!options.fresh) return;
+    try { removeProfile(); } catch { /* a throw-away folder in the system's temp folder */ }
+  };
   disablePasswordSaving(profile);
+  dropHistory(profile);
 
   const context = await playwright.chromium.launchPersistentContext(profile, {
     channel: options.browser.channel,
@@ -510,17 +527,34 @@ async function walk(o) {
 
   await context.addInitScript(installUiHost);
 
-  // --video: Playwright writes one file per page when the browser closes; they get stable names in the walk folder.
+  // --video: one recording per page, in the order the pages opened, saved under stable names. saveAs is asked for
+  // before the browser closes, because Playwright refuses it afterwards; it resolves once the page has closed and the
+  // file is complete.
+  const videos = [];
+  const keepVideo = p => { const v = p.video(); if (v) videos.push(v); };
+  if (options.video) {
+    context.pages().forEach(keepVideo);
+    context.on('page', keepVideo);
+  }
   const closeBrowser = async () => {
-    await context.close().catch(() => {});
-    if (!options.video || !fs.existsSync(videoDir)) return;
-    const files = fs.readdirSync(videoDir).filter(f => f.endsWith('.webm') && !/^walk(-\d+)?\.webm$/.test(f)).sort();
-    files.forEach((f, i) => {
-      const name = i === 0 ? 'walk.webm' : `walk-${i + 1}.webm`;
-      fs.renameSync(path.join(videoDir, f), path.join(videoDir, name));
-      meta.videos.push(`video/${name}`);
+    const saving = videos.splice(0).map((v, i) => {
+      const n = meta.videos.length + i;
+      const name = n ? `walk-${n + 1}.webm` : 'walk.webm';
+      return { v, name, saved: v.saveAs(path.join(videoDir, name)).then(() => true, () => false) };
     });
-    saveMeta();
+    await context.close().catch(() => {});
+    for (const { v, name, saved } of saving) {
+      const raw = await v.path().catch(() => null);
+      if (await saved) {
+        if (raw) try { fs.rmSync(raw, { force: true }); } catch { /* left beside the copy */ }
+        meta.videos.push(`video/${name}`);
+      } else if (raw && fs.existsSync(raw)) {
+        // After a crash Playwright no longer hands the recording over, and its recorder keeps the file open until this
+        // process ends; the walk links to that file under its own name.
+        meta.videos.push(`video/${path.basename(raw)}`);
+      }
+    }
+    if (options.video) saveMeta();
   };
 
   // --trace: recorded after the sign-in, in parts. A part ends when the value box appears and the next begins when the
@@ -819,7 +853,7 @@ async function walk(o) {
       meta.error = 'browser closed before sign-in';
       saveMeta();
       await closeBrowser();
-      if (options.fresh) fs.rmSync(profile, { recursive: true, force: true });
+      dropFreshProfile();
       return { meta, counts, signedOut: false };
     }
     meta.readyAt = new Date().toISOString();
@@ -921,7 +955,8 @@ async function walk(o) {
       ],
     }).catch(() => ({ a: 'close' }));
     await closeBrowser();
-    if (options.fresh || closing.a === 'signout') fs.rmSync(profile, { recursive: true, force: true });
+    if (closing.a === 'signout') removeProfile();
+    else dropFreshProfile();
     return { meta, counts, signedOut: closing.a === 'signout' };
   } catch (e) {
     meta.endedAt = new Date().toISOString();
@@ -931,7 +966,7 @@ async function walk(o) {
     saveMeta();
     await tracePause();
     await closeBrowser();
-    if (options.fresh) fs.rmSync(profile, { recursive: true, force: true });
+    dropFreshProfile();
     throw e;
   }
 }

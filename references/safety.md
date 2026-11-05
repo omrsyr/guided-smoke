@@ -18,7 +18,8 @@
 - The user signs in, always. The script waits until the browser leaves the sign-in pages. Never put a user name,
   password, token or verification code in a plan, a command, an environment variable or the chat.
 - The smoke profile (`profiles/<project>-<browser>`) keeps the session cookie between walks; Chrome and Edge encrypt
-  it with the operating system's key. Password saving is switched off in that profile. `--fresh` uses a throw-away
+  it with the operating system's key. Password saving is switched off in that profile, and its browsing history
+  (where Chrome also keeps downloads) is dropped before each walk. `--fresh` uses a throw-away
   profile; `reset-login` and the closing screen's "Sign out and clear the profile" delete it.
 - A step that needs an account of its own (an API call) asks the user to type it into the value box (`secretBox`).
   The values stay in the page: the engine never reads them, `inPage` masks them (`•••`) in what it returns, and a

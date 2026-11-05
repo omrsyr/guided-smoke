@@ -21,6 +21,7 @@ const { walk } = require('../engine');
  *                               while a countdown runs)
  * @param {boolean} [o.letAuto]  leave a panel alone while its --auto countdown runs
  * @param {object} [o.options]   more walk options (auto, trace, video, panel)
+ * @param {string} [o.profile]   a kept profile folder, as in a real walk (default: a throw-away one)
  */
 async function autoWalk(o) {
   let context = null;
@@ -71,8 +72,8 @@ async function autoWalk(o) {
   try {
     return await walk({
       plan: o.plan, planId: o.plan.id || 'plan', walkId: `${o.plan.id || 'plan'}-1`, project: 'test', walkDir: o.walkDir,
-      playwright, profile: null,
-      options: { browser: o.browser, base: o.base, pace: 'fast', allowed: null, fresh: true, lang: o.lang,
+      playwright, profile: o.profile || null,
+      options: { browser: o.browser, base: o.base, pace: 'fast', allowed: null, fresh: !o.profile, lang: o.lang,
         locale: o.lang === 'tr' ? 'tr-TR' : 'en-US', screens: null, ...(o.options || {}) },
     });
   } finally {

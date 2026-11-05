@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **A download in the second walk of a kept profile crashed Chrome.** Chrome keeps downloads in the profile's
+  browsing history; with the earlier walk's download in it (a file Playwright had already deleted), Chrome 153
+  crashed at the next download, or hung headless. The engine now drops that history before the browser opens a
+  profile; the sign-in is kept elsewhere and stays. Edge was not affected. The tests now also walk twice on one
+  kept profile.
+- **`--video` after a crash.** The recording was renamed while Playwright still held it, and the walk ended with
+  `EBUSY`. Recordings are now saved with Playwright's `saveAs`, in the order the pages opened; after a crash the
+  walk links the file Playwright was writing, under its own name.
+- With `--fresh`, a crashed browser's helper processes could keep the throw-away profile busy and end the walk
+  with an error while removing it. The removal now retries and then leaves the folder to the system.
+
 ## 1.0.0 — 2026-11-05
 
 - **`--auto`.** A step whose automatic check passed without plan warnings goes on by itself after a 3-second

@@ -368,6 +368,69 @@ function unzip(file) {
   return files;
 }
 
+// Chrome keeps downloads in the profile's history; with the earlier walk's download in it, Chrome 153 crashed (or hung
+// headless) at the next download.
+test('a kept profile downloads again in the next walk', { skip, timeout: 120000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-profile-'));
+  const plan = {
+    id: 'again', start: '/orders/1001', ready: '#order-card', login: '/login',
+    steps: [{
+      title: 'Download', did: 'x', expect: ['x'],
+      run: async ({ page, download, state }) => { state.file = await download(page.locator('#invoice')); },
+      check: async ({ state }) => [state.file.size > 0, state.file.name],
+    }],
+  };
+  try {
+    for (const n of [1, 2]) {
+      const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+      try {
+        const { meta } = await autoWalk({ playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn, profile });
+        const [e] = readEvents(walkDir);
+        assert.strictEqual(meta.result, 'completed', `walk ${n}: ${e.error || ''}`);
+        assert.ok(e.auto.ok, `walk ${n}: ${e.auto.text}`);
+      } finally {
+        fs.rmSync(walkDir, { recursive: true, force: true });
+      }
+    }
+  } finally {
+    await app.close();
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test('--video links the recording when the browser crashes, and the walk stops cleanly', { skip: noVideo, timeout: 60000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  let crashed = false;
+  const plan = {
+    id: 'crash', start: '/orders/1001', ready: '#order-card', login: '/login',
+    steps: [
+      { title: 'First', did: 'x', expect: ['x'], run: async () => {} },
+      { title: 'Crash', did: 'x', expect: ['x'], run: async () => {} },
+    ],
+  };
+  try {
+    const { meta } = await autoWalk({
+      playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn, options: { video: true },
+      onPanel: async (page, { title }) => {
+        if (title !== 'Crash' || crashed) return;
+        crashed = true;
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send('Browser.crash').catch(() => {});
+      },
+    });
+    assert.ok(crashed, 'the browser was crashed');
+    assert.strictEqual(meta.result, 'stopped');
+    // Playwright keeps a crashed page's recording under its own name, still open until this process ends.
+    assert.strictEqual(meta.videos.length, 1);
+    assert.deepStrictEqual(fs.readdirSync(path.join(walkDir, 'video')), [path.basename(meta.videos[0])]);
+  } finally {
+    await app.close();
+    try { fs.rmSync(walkDir, { recursive: true, force: true }); } catch { /* the recorder still holds the file */ }
+  }
+});
+
 test('--video without ffmpeg stops before the browser opens and names setup --video', { skip: !playwright && 'playwright-core is not installed (node engine/run.js setup)' }, () => {
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-ffmpeg-'));
   const walks = store.walksDir('guided-smoke-demo');
@@ -428,6 +491,7 @@ test('--trace leaves the value box out of every part, --video is saved, and the 
     }
     assert.deepStrictEqual(meta.videos, ['video/walk.webm']);
     assert.ok(fs.statSync(path.join(walkDir, 'video', 'walk.webm')).size > 1000);
+    assert.deepStrictEqual(fs.readdirSync(path.join(walkDir, 'video')), ['walk.webm'], 'no leftover recording');
   } finally {
     await app.close();
     fs.rmSync(walkDir, { recursive: true, force: true });
