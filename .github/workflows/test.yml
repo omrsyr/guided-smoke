@@ -22,7 +22,7 @@ jobs:
         include:
           # The oldest Node.js the skill claims to support.
           - os: ubuntu-latest
-            node: 18
+            node: 20
     env:
       # The hosted runners ship Google Chrome; a missing browser must fail the run, not skip the browser tests.
       GUIDED_SMOKE_BROWSER: chrome

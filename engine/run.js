@@ -22,6 +22,8 @@ const report = require('./report');
 const { pickLanguage, systemLocale, LANGUAGES } = require('./i18n');
 
 const PLAYWRIGHT_VERSION = '1.63.0';
+// The floor of that playwright-core: below it, loading it ends the process with its own message.
+const MIN_NODE = 20;
 const VERSION = '0.1.2';
 
 const EXIT = { ok: 0, error: 1, usage: 2, runtime: 3, resolve: 4 };
@@ -187,6 +189,10 @@ async function main() {
   if (command === 'help' || flags.help) {
     console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 14).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
     return EXIT.ok;
+  }
+  if (Number(process.versions.node.split('.')[0]) < MIN_NODE) {
+    console.error(`guided-smoke needs Node.js ${MIN_NODE} or newer; this is ${process.version}. Install a current LTS (22 or 24) and run again.`);
+    return EXIT.runtime;
   }
   const project = flags.project ? store.safeName(flags.project) : store.detectProject();
 

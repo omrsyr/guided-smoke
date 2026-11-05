@@ -33,7 +33,7 @@ listesini okuman, tek başına tıklaman ya da hızla akıp giden bir betiği iz
 ## Gereksinimler
 
 - Windows, macOS ya da Linux'ta Claude Code (ya da kabuk erişimi olan başka bir ajan)
-- Node.js 18 ya da üstü
+- Node.js 20 ya da üstü (Playwright'ın alt sınırı; 20'nin kendi desteği bittiği için 22 ya da 24 daha iyi bir seçim)
 - Google Chrome ya da Microsoft Edge (tarayıcı indirilmez; kurulu olan sürülür)
 
 Her push'ta testler Windows, macOS ve Linux'ta koşar (GitHub Actions): motorun testleri ve Chrome'da headless demo

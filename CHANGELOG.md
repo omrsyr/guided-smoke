@@ -2,8 +2,10 @@
 
 ## Unreleased
 
+- **Node.js 20 or newer** (was 18): playwright-core 1.63 needs it. Older versions get a clear message and exit
+  code 3 before anything loads.
 - **Tested on Windows, macOS and Linux.** GitHub Actions runs `setup`, the engine's tests and the headless demo in
-  Chrome on all three on every push (Node.js 24), and on Linux with Node.js 18, the oldest supported. With
+  Chrome on all three on every push (Node.js 24), and on Linux with Node.js 20, the oldest supported. With
   `GUIDED_SMOKE_REQUIRE_BROWSER` set, the browser tests fail instead of skipping when no browser can run.
 - **Demo.** `node engine/run.js demo` (or `/guided-smoke demo`) starts a small orders application on 127.0.0.1 and
   walks a 14-step plan against it, in the panel's language (English or Turkish): sign-in, a form, a validation the

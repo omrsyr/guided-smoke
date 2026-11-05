@@ -33,7 +33,7 @@ checklist, clicking through it alone, or watching a script race past.
 ## Requirements
 
 - Claude Code (or another agent with shell access) on Windows, macOS or Linux
-- Node.js 18 or newer
+- Node.js 20 or newer (the floor of Playwright; 20 itself is past its end of life, so 22 or 24 is the better choice)
 - Google Chrome or Microsoft Edge (no browser is downloaded; the installed one is driven)
 
 Every push runs the tests on Windows, macOS and Linux (GitHub Actions): the engine's tests, and the demo walked

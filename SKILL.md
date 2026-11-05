@@ -9,7 +9,7 @@ description: >
   most suggest it once when a task reaches its smoke step.
 license: MIT
 compatibility: >
-  Claude Code (or any agent with shell access) on Windows, macOS or Linux; Node.js 18+; Google Chrome or Microsoft
+  Claude Code (or any agent with shell access) on Windows, macOS or Linux; Node.js 20+; Google Chrome or Microsoft
   Edge installed; the application under test reachable from this machine.
 metadata:
   author: omrsyr
@@ -78,7 +78,7 @@ node run.js demo [flags]              start the demo application and walk its pl
 node run.js list | report <ref> | reset-login | paths
 ```
 
-Exit codes: 0 done · 2 usage error · 3 runtime missing (`setup`) · 4 reference not found or ambiguous · 1 other error.
+Exit codes: 0 done · 2 usage error · 3 runtime missing (`setup`) or Node.js too old · 4 reference not found or ambiguous · 1 other error.
 The project is the git repository's folder name (override with `--project`). Data lives outside the repository:
 `%LOCALAPPDATA%\guided-smoke` (Windows), `~/Library/Application Support/guided-smoke` (macOS),
 `~/.local/share/guided-smoke` (Linux), or `GUIDED_SMOKE_HOME`.
