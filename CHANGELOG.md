@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 — 2026-11-06
 
 - **Browser errors under each step.** The panel shows what the screen does not: uncaught script errors (and unhandled
   rejections), `console.error`, HTTP 4xx/5xx responses and requests that failed, counted from the previous answer to
