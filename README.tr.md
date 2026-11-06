@@ -26,8 +26,10 @@ listesini okuman, tek başına tıklaman ya da hızla akıp giden bir betiği iz
 - Kendi hesabıyla bir API çağıran adım, o hesabı sayfadaki **değer kutusuna** yazmanı ister. Çağrı sayfanın içinde
   yapılır; betik değerleri hiç görmez, geri aldığı sonuçta da maskelenirler. Kutuyu doldurmadan ilerlersen adım kutuyu
   bekler.
-- Her cevap anında kaydedilir. **Rapor** geçeni ve farklı olanı, ölçülen koşu süresini, önceki koşudan bu yana neyin
-  değiştiğini ve iş kaydına yapıştırılacak bir bloğu verir.
+- Panel her adımın altında ekranda göremediğini de gösterir: adım sırasında tarayıcının bildirdiği **JS hataları,
+  konsol hataları ve başarısız istekler** (HTTP 4xx/5xx, hiç cevap almayan çağrı).
+- Her cevap anında kaydedilir. **Rapor** geçeni ve farklı olanı, tarayıcının hata bildirdiği adımları, ölçülen koşu
+  süresini, önceki koşudan bu yana neyin değiştiğini ve iş kaydına yapıştırılacak bir bloğu verir.
 - Düzeltmeden sonra `run 6655 --retry-failed` yalnız ✖ işaretli adımları koşar.
 
 ## Gereksinimler
@@ -74,7 +76,7 @@ node ~/.claude/skills/guided-smoke/engine/run.js demo      # plugin'de: aynı ik
 
 127.0.0.1'de küçük bir demo uygulaması açılır ve tarayıcında 14 adımlık bir koşu başlar: sayfada yazan hesapla giriş
 yap, sonra paneli izle (yaklaşık 5 dakika). Her adım türü var: form, tarayıcının engellediği bir doğrulama, indirme,
-pencere, iki izinli adım, arka plan işi ve değer kutusuyla API çağrıları. Makinenden hiçbir şey çıkmaz; demo
+pencere, iki izinli adım, arka plan işi, değer kutusuyla API çağrıları ve bilerek düşen bir arka plan çağrısı (panel gösterir). Makinenden hiçbir şey çıkmaz; demo
 kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin.
 
 ## Kullanım
@@ -104,8 +106,9 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
 - Planlar, koşular, raporlar ve profiller reponun dışında durur:
   `%LOCALAPPDATA%\guided-smoke` (Windows), `~/Library/Application Support/guided-smoke` (macOS),
   `~/.local/share/guided-smoke` (Linux) ya da `GUIDED_SMOKE_HOME`.
-- Kayda giren: adım başlıkları, cevapların ve notların, otomatik kontrol metinleri, süreler. Girmeyen: sayfanın HTML'i,
-  çerezler, form değerleri, kimlik bilgileri. Ekran görüntüsü yalnız sen istersen.
+- Kayda giren: adım başlıkları, cevapların ve notların, otomatik kontrol metinleri, süreler; tarayıcı hatalarından
+  yalnız tür, yöntem, yol (sorgusuz, kimlikler maskeli) ve durum kodu. Girmeyen: sayfanın HTML'i, çerezler, form
+  değerleri, kimlik bilgileri, istek/yanıt gövdeleri, hata mesajları. Ekran görüntüsü yalnız sen istersen.
 
 ![Sol alttaki değer kutusu (İngilizce panel): API hesabını kullanıcı yazdı; kutuda görünen sonuçta e-posta da parola da yok](docs/screenshot-box.png)
 

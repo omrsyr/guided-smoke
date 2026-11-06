@@ -13,6 +13,7 @@ module.exports = {
   ready: '#order-card',             // selector present only when signed in and on the start page
   login: 'account/login',           // regex source for sign-in URLs (optional)
   locale: 'en-US',                  // optional browser locale
+  ignoreErrors: ['GET /hub/negotiate → 404'],   // optional: known browser noise (see rule 16)
   steps: [ /* … */ ],
 };
 ```
@@ -92,3 +93,12 @@ For an API that needs the user's account, the project's database tool, or a back
     styled with `transform`, `filter` or `contain` carries them along: they are placed and clipped against it. If the
     panel looks out of place inside such a dialog, mark the dialog's content and let the step close it with the next
     action.
+16. **Browser errors.** The panel shows under each step what the browser reported since the previous answer: script
+    errors (uncaught, unhandled rejections), `console.error`, failed requests and HTTP 4xx/5xx responses. Chrome's own
+    "Failed to load resource" echo and cancelled requests (`net::ERR_ABORTED`: a download, a page leaving) are not
+    counted. A step that expects an error response (a refused sign-in, a validation 400) says so in `expect`, in the
+    panel's words: "Under the step the panel shows "⚠ In the browser: 1 failed request"". Such a step does not go on by
+    itself under `--auto`. Put noise the application always makes in this environment (a dev-only hub, telemetry) in
+    the plan's `ignoreErrors`: regular expressions, or pattern strings (case-insensitive), matched against the line
+    the panel shows, e.g. `'GET /hub/negotiate → 404'` or `/WebSocket connection to .* failed/`. Ignored errors are
+    still counted as ignored. Never use it to hide an error the change under test causes.

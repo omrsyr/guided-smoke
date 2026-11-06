@@ -1,6 +1,7 @@
 'use strict';
 // The demo application for `node run.js demo`: a tiny orders site with a sign-in, one order with a due date, an invoice
-// download, the application's own confirm dialog, a client API with an account of its own and a reminder job. It
+// download, the application's own confirm dialog, a client API with an account of its own, a reminder job and a help
+// page whose background call fails on purpose. It
 // listens on 127.0.0.1 only, keeps everything in memory and forgets it when it stops. It exists for the demo plan.
 
 const http = require('http');
@@ -74,6 +75,12 @@ const dialog = document.getElementById('cancel-dialog');
 if (dialog) {
   document.getElementById('cancel').addEventListener('click', () => dialog.showModal());
   document.getElementById('cancel-no').addEventListener('click', () => dialog.close());
+}
+// The help page loads its tips in the background, and the demo fails that call on purpose: the screen shows nothing,
+// the panel shows the failed request and the error it leaves.
+const tips = document.querySelector('[data-tips]');
+if (tips) {
+  fetch(tips.dataset.tips).then(r => { if (!r.ok) throw new Error('Tips could not be loaded (HTTP ' + r.status + ')'); });
 }
 `;
 
@@ -250,8 +257,9 @@ ${failed ? `<div class="alert alert-error" role="alert">${esc(T.wrongSignIn)}</d
       return redirect('/jobs');
     }
     if (route === 'GET /help/orders') {
-      return html(page(T, lang, T.helpTitle, `<section class="card"><h1>${esc(T.helpTitle)}</h1><p id="help-due">${esc(T.helpDue)}</p></section>`));
+      return html(page(T, lang, T.helpTitle, `<section class="card" data-tips="/api/tips"><h1>${esc(T.helpTitle)}</h1><p id="help-due">${esc(T.helpDue)}</p></section>`));
     }
+    if (route === 'GET /api/tips') return json(500, { message: 'The demo fails this call on purpose.' });
     return send(404, 'text/plain', 'Not found');
   }
 }

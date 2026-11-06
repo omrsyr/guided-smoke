@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Browser errors under each step.** The panel shows what the screen does not: uncaught script errors (and unhandled
+  rejections), `console.error`, HTTP 4xx/5xx responses and requests that failed, counted from the previous answer to
+  this step's answer, and updated while the panel waits. Chrome's own "Failed to load resource" echo (it would count
+  every failed request twice, with its query) and cancelled requests (`net::ERR_ABORTED`: downloads, a page leaving)
+  are left out, and so is the sign-in. `events.jsonl` gains `browserErrors` (counts and the first five entries: kind,
+  method, path without query, id-like parts as `•••`, status, the error's type and the script's place; never a
+  message or a body); while the value box is drawn even the path is masked. The report flags those steps in the
+  summary, the note column and the paste block, and lists them in a new "Browser errors" section; the closing panel
+  and the `result:` line count them. A step with browser errors does not go on by itself under `--auto`.
+- **`ignoreErrors`** in a plan: regular expressions or pattern strings for noise the application always makes in that
+  environment, matched against the panel's line; such errors are counted as ignored, not as errors. A bad pattern is
+  refused before the browser opens.
+- The demo's help page loads its tips in the background and the demo fails that call on purpose (step 14); step 12
+  shows the refused API sign-in with its address masked.
 - The description now also says "acceptance test" and "UAT walkthrough", the words people search for; the trigger
   list gains "acceptance test / UAT / walkthrough" and "kabul testi". No change in behaviour.
 

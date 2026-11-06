@@ -22,8 +22,10 @@ metadata:
 A smoke the user can follow. The script drives a visible browser one step at a time; a panel on the page says
 **what I did** and **what you should see** (the place is outlined in orange), shows an automatic check, and waits for
 the user: **✔ Correct, continue**, **✖ Different** (with a note) or **■ Stop**. Steps that change something outside the
-page (a database row, a file, an e-mail) ask first. Every answer is written down at once; the report says what passed,
-what differed, how long the walk took and what changed since the previous walk.
+page (a database row, a file, an e-mail) ask first. Under each step the panel also shows what the screen does not: the
+script errors, console errors and failed requests the browser reported. Every answer is written down at once; the
+report says what passed, what differed, where the browser reported errors, how long the walk took and what changed
+since the previous walk.
 
 ## Activation boundary
 

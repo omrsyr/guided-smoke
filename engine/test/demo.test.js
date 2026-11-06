@@ -60,6 +60,15 @@ for (const [lang, boxLate] of [['en', false], ['tr', true]]) {
         if (e.auto) assert.ok(e.auto.ok, `${e.n}. ${e.title}: ${e.auto.text}`);
         assert.ok(!e.warnings, `${e.n}. ${e.title}: ${JSON.stringify(e.warnings)}`);
       }
+      // Only the refused API sign-in (the box is open: no address) and the help page's failing tips call report errors;
+      // the download, the sign-in and the favicon do not.
+      const browserErrors = Object.fromEntries(steps.filter(e => e.browserErrors).map(e => [e.n, e.browserErrors]));
+      assert.deepStrictEqual(Object.keys(browserErrors).map(Number), [12, 14], JSON.stringify(browserErrors));
+      assert.deepStrictEqual(browserErrors[12].first, [{ kind: 'http', method: 'POST', url: '•••', status: 401, masked: true }]);
+      const tips = browserErrors[14];
+      assert.deepStrictEqual([tips.js, tips.console, tips.http, tips.failed], [1, 0, 1, 0], JSON.stringify(tips));
+      assert.ok(tips.first.some(r => r.kind === 'http' && r.method === 'GET' && r.url === '/api/tips' && r.status === 500), JSON.stringify(tips));
+      assert.ok(tips.first.some(r => r.kind === 'js' && r.name === 'Error' && /^\/app\.js:\d+$/.test(r.at)), JSON.stringify(tips));
       const recorded = fs.readdirSync(walkDir).filter(f => fs.statSync(path.join(walkDir, f)).isFile())
         .map(f => fs.readFileSync(path.join(walkDir, f), 'utf8')).join('\n');
       assert.ok(!recorded.includes(server.API_ACCOUNT.password) && !recorded.includes(server.API_ACCOUNT.email), 'box values stay out of the records');
@@ -308,6 +317,53 @@ test('--auto passes only a step whose check passed, after a countdown the user c
     const by = readEvents(walkDir).map(e => [e.title, e.answer, e.answeredBy || 'user']);
     assert.deepStrictEqual(by, [['Goes on', 'pass', 'auto'], ['Held', 'pass', 'user'], ['Failed', 'pass', 'user'], ['No check', 'pass', 'user']]);
     assert.strictEqual(counts.auto, 1);
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+test('browser errors reach the panel as they arrive and hold --auto; the sign-in, ignoreErrors and the value box keep them out', { skip, timeout: 90000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const shown = {};
+  const ok = async () => [true, 'ok'];
+  const plan = {
+    id: 'errors', start: '/orders/1001', ready: '#order-card', login: '/login',
+    ignoreErrors: ['GET /known-noise → 404'],
+    steps: [
+      { title: 'Clean', did: 'x', expect: ['x'], run: async () => {}, check: ok },
+      // The call fails only after the panel is up and its countdown runs.
+      { title: 'Late', did: 'x', expect: ['x'], run: async ({ page }) => { await page.evaluate(() => { setTimeout(() => fetch('/api/tips'), 800); }); }, check: ok },
+      { title: 'Ignored', did: 'x', expect: ['x'], run: async ({ page }) => { await page.evaluate(() => fetch('/known-noise?user=a@b.test')); }, check: ok },
+      { title: 'Boxed', did: 'x', expect: ['x'], run: async ({ page, secretBox }) => {
+        await secretBox({ fields: [{ name: 'token', label: 'Token' }] });
+        await page.evaluate(() => { console.error('typed box-secret-42'); return fetch('/api/missing/box-secret-42'); });
+        await secretBox(null);
+      }, check: ok },
+    ],
+  };
+  // Noise on the sign-in page is the user's own page, not the walk's.
+  const noisySignIn = { when: '#user', fill: async page => { await page.evaluate(() => console.error('noise on the sign-in page')); await signIn.fill(page); } };
+  try {
+    const { counts } = await autoWalk({
+      playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn: noisySignIn, letAuto: true, options: { auto: true },
+      onPanel: async (page, { title }) => { shown[title] = await page.locator('#__guided_smoke [data-guided-smoke-errors]').textContent(); },
+    });
+    const events = readEvents(walkDir);
+    assert.deepStrictEqual(events.map(e => [e.title, e.answeredBy || 'user']), [['Clean', 'auto'], ['Late', 'user'], ['Ignored', 'auto'], ['Boxed', 'user']]);
+    assert.strictEqual(events[0].browserErrors, undefined, JSON.stringify(events[0].browserErrors));
+    assert.deepStrictEqual(events[1].browserErrors.first, [{ kind: 'http', method: 'GET', url: '/api/tips', status: 500 }]);
+    assert.match(shown.Late, /In the browser: 1 failed request.*GET \/api\/tips → 500/);
+    assert.deepStrictEqual(events[2].browserErrors, { js: 0, console: 0, http: 0, failed: 0, ignored: 1, first: [] });
+    assert.match(shown.Ignored, /^1 left out by the plan \(ignoreErrors\)$/);
+    assert.deepStrictEqual(events[3].browserErrors.first, [{ kind: 'console', masked: true }, { kind: 'http', method: 'GET', url: '•••', status: 404, masked: true }]);
+    assert.strictEqual(counts.errorSteps, 2);
+    const recorded = fs.readdirSync(walkDir).filter(f => fs.statSync(path.join(walkDir, f)).isFile())
+      .map(f => fs.readFileSync(path.join(walkDir, f), 'utf8')).join('\n');
+    for (const leak of ['box-secret-42', 'a@b.test', 'noise on the sign-in page']) {
+      assert.ok(!recorded.includes(leak) && !Object.values(shown).join('\n').includes(leak), leak);
+    }
   } finally {
     await app.close();
     fs.rmSync(walkDir, { recursive: true, force: true });

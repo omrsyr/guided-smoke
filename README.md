@@ -26,8 +26,10 @@ checklist, clicking through it alone, or watching a script race past.
 - A step that calls an API with an account of its own asks you to type that account into a **value box** on the page.
   The call runs inside the page; the script never sees the values, and they are masked in what it gets back. If you
   move on before typing, the step waits for the box.
-- Every answer is saved at once. The **report** lists what passed and what differed, the measured walk time, what
-  changed since the previous walk, and a block to paste into your work item.
+- Under each step the panel also shows what you cannot see on the screen: **script errors, console errors and failed
+  requests** (HTTP 4xx/5xx, a call that never got an answer) the browser reported during the step.
+- Every answer is saved at once. The **report** lists what passed and what differed, the steps with browser errors,
+  the measured walk time, what changed since the previous walk, and a block to paste into your work item.
 - After a fix, `run 6655 --retry-failed` runs only the steps marked ✖.
 
 ## Requirements
@@ -74,7 +76,7 @@ node ~/.claude/skills/guided-smoke/engine/run.js demo      # from the plugin: th
 
 A small demo application starts on 127.0.0.1 and a 14-step walk opens in your browser: sign in with the account shown
 on the page, then follow the panel (about 5 minutes). It covers every kind of step: a form, a validation the browser
-blocks, a download, a dialog, two permitted steps, a background job and API calls through the value box. Nothing
+blocks, a download, a dialog, two permitted steps, a background job, API calls through the value box and a background call that fails on purpose (the panel shows it). Nothing
 leaves your machine, and the demo forgets everything when it stops. In Claude Code you can also say
 `/guided-smoke demo`.
 
@@ -105,8 +107,9 @@ Useful flags: `--browser chrome|edge`, `--base https://localhost:5001`, `--pace 
 - Plans, walks, reports and profiles live outside your repository:
   `%LOCALAPPDATA%\guided-smoke` (Windows), `~/Library/Application Support/guided-smoke` (macOS),
   `~/.local/share/guided-smoke` (Linux), or `GUIDED_SMOKE_HOME`.
-- Recorded: step titles, your answers and notes, automatic-check texts, times. Never: page HTML, cookies, form values,
-  credentials. Screenshots only when you ask.
+- Recorded: step titles, your answers and notes, automatic-check texts, times, and of browser errors only the kind,
+  method, path (no query, ids masked) and status. Never: page HTML, cookies, form values, credentials, request or
+  response bodies, error messages. Screenshots only when you ask.
 
 ![The value box at the bottom left: the user typed the API account; the result shown in the box carries no e-mail or password](docs/screenshot-box.png)
 

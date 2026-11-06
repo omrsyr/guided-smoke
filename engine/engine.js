@@ -7,6 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { texts, format } = require('./i18n');
+const { Bucket, fromConsole, fromPageError, fromResponse, fromFailed, compileIgnore, total: errorTotal } = require('./errors');
 
 const PACE = { slow: 400, normal: 200, fast: 60 };
 const DEFAULT_LOGIN = /(login|signin|sign-in|giris|auth|account\/)/i;
@@ -67,7 +68,8 @@ function installUiHost() {
 
 // Runs in the page. Draws the panel; every text goes in through textContent, never as HTML.
 // s.side puts it at the bottom left or right; s.min starts it minimized; s.countdown (--auto) answers ✔ by itself when
-// the time is up, unless the user presses any button first.
+// the time is up, unless the user presses any button first. s.errors is what the browser reported during the step;
+// errors that arrive later are shown at once (updateErrors) and stop the countdown.
 function drawPanel(s) {
   const old = document.getElementById('__guided_smoke');
   if (old) old.remove();
@@ -107,6 +109,9 @@ function drawPanel(s) {
       { marginTop: '8px', fontWeight: '600', color: s.auto.ok ? '#198754' : '#dc3545' }));
   }
   (s.warnings || []).forEach(w => body.appendChild(el('div', w, { marginTop: '8px', fontWeight: '600', color: '#b35c00' })));
+  const errs = el('div');
+  errs.setAttribute('data-guided-smoke-errors', '');
+  body.appendChild(errs);
   let timer = null;
   let line = null;
   let hold = null;
@@ -178,6 +183,20 @@ function drawPanel(s) {
     tick();
     timer = setInterval(tick, 1000);
   }
+  const showErrors = v => {
+    errs.textContent = '';
+    if (!v) return;
+    if (v.total) {
+      stopCountdown();
+      errs.appendChild(el('div', v.summary, { marginTop: '8px', fontWeight: '600', color: '#b35c00' }));
+      const list = el('div', null, { font: '12px/1.4 Consolas, monospace', color: '#495057', marginTop: '2px', wordBreak: 'break-word' });
+      [...v.lines, ...(v.more ? [v.more] : [])].forEach(l => list.appendChild(el('div', l)));
+      errs.appendChild(list);
+    }
+    if (v.ignored) errs.appendChild(el('div', v.ignored, { marginTop: v.total ? '2px' : '8px', fontSize: '12px', color: '#6c757d' }));
+  };
+  showErrors(s.errors);
+  box.__guidedSmokeErrors = showErrors;
   if (s.shot) {
     const shot = el('button', s.t.shot, { background: '#fff', color: '#0d6efd', border: '1px solid #0d6efd', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer' });
     shot.onclick = async () => {
@@ -279,6 +298,12 @@ function drawBox(s) {
     if (first) inputs[first.name].focus();
   }
   box.__guidedSmokeWaiting = waiting;
+}
+
+// Runs in the page. Shows the step's browser errors in the drawn panel without redrawing it, so a note being typed stays.
+function updateErrors(view) {
+  const panel = document.getElementById('__guided_smoke');
+  if (panel && panel.__guidedSmokeErrors) panel.__guidedSmokeErrors(view);
 }
 
 // Runs in the page. Switches the drawn box in or out of waiting without redrawing it, so what was typed stays.
@@ -475,7 +500,9 @@ async function walk(o) {
   const screensDir = path.join(walkDir, 'screens');
   const downloadsDir = path.join(walkDir, 'downloads');
   const videoDir = path.join(walkDir, 'video');
-  const counts = { pass: 0, diff: 0, skip: 0, against: 0, auto: 0 };
+  const counts = { pass: 0, diff: 0, skip: 0, against: 0, auto: 0, errorSteps: 0 };
+  // What the browser reports during a step: collected from the previous answered step to this step's answer.
+  const seen = new Bucket(compileIgnore(plan.ignoreErrors));
   const side = options.panel && options.panel.side === 'left' ? 'left' : 'right';
   let panelMin = !!(options.panel && options.panel.min);
 
@@ -497,7 +524,9 @@ async function walk(o) {
     if (event.answer === 'skip') counts.skip++;
     if (event.againstCheck) counts.against++;
     if (event.answeredBy === 'auto') counts.auto++;
-    console.log(`[${event.n}] ${event.answer}${event.reason ? ' (' + event.reason + ')' : ''}${event.note ? ' — ' + event.note : ''}`);
+    const browserErrors = errorTotal(event.browserErrors);
+    if (browserErrors) counts.errorSteps++;
+    console.log(`[${event.n}] ${event.answer}${event.reason ? ' (' + event.reason + ')' : ''}${event.note ? ' — ' + event.note : ''}${browserErrors ? ` · browser errors: ${browserErrors}` : ''}`);
   };
 
   const profile = options.fresh ? fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-')) : o.profile;
@@ -607,7 +636,9 @@ async function walk(o) {
     return path.relative(walkDir, file).split(path.sep).join('/');
   };
 
-  await context.exposeFunction('__guidedSmokeAnswer', (a, note, by) => {
+  await context.exposeFunction('__guidedSmokeAnswer', async (a, note, by) => {
+    // The countdown ran out just before an error reached the panel: the step waits for the user after all.
+    if (by === 'auto' && current && current.errorsLive && seen.total()) { await draw(current); return; }
     if (pending) { const r = pending; pending = null; r({ a, note, by: by === 'auto' ? 'auto' : undefined }); }
   });
   await context.exposeFunction('__guidedSmokeMin', on => { panelMin = !!on; });
@@ -624,8 +655,9 @@ async function walk(o) {
 
   // A navigation wipes the panel and the value box; draw them again. The box comes back empty: its values are gone.
   let box = null;
-  // Every panel takes the walk's corner and the user's last minimize choice (--panel sets both at the start).
-  const dressed = panel => ({ ...panel, side, min: panelMin });
+  // Every panel takes the walk's corner and the user's last minimize choice (--panel sets both at the start); a step's
+  // panel also the browser errors seen so far.
+  const dressed = panel => ({ ...panel, side, min: panelMin, ...(panel.errorsLive ? { errors: seen.view(t) } : {}) });
   page.on('load', async () => {
     if (box) { try { await page.evaluate(drawBox, box); } catch { /* page still loading */ } }
     if (current) { try { await page.evaluate(drawPanel, dressed(current)); } catch { /* page still loading */ } }
@@ -790,6 +822,30 @@ async function walk(o) {
     return out ? out.result : undefined;
   };
 
+  // ---- what the browser reports that the screen does not show ----
+  // Off during the sign-in (the user's own pages), after the last step and once Stop has cut the page off. A request
+  // sent while the value box is drawn, and any message logged meanwhile, are kept without address or text.
+  let watching = false;
+  const boxRequests = new WeakSet();
+  let liveQueued = false;
+  const saw = entry => {
+    if (!entry || !watching || stopRequested || closed) return;
+    seen.add(entry);
+    if (liveQueued) return;
+    liveQueued = true;
+    setTimeout(() => {
+      liveQueued = false;
+      if (current && current.errorsLive) page.evaluate(updateErrors, seen.view(t)).catch(() => {});
+    }, 100);
+  };
+  context.on('request', r => { if (box) boxRequests.add(r); });
+  context.on('console', m => saw(fromConsole({ type: m.type(), text: m.text(), location: m.location() }, base, !!box)));
+  context.on('weberror', w => saw(fromPageError(w.error(), base, !!box)));
+  context.on('response', r => {
+    if (r.status() >= 400) saw(fromResponse({ method: r.request().method(), url: r.url(), status: r.status() }, base, !!box || boxRequests.has(r.request())));
+  });
+  context.on('requestfailed', r => saw(fromFailed({ method: r.method(), url: r.url(), errorText: (r.failure() || {}).errorText }, base, !!box || boxRequests.has(r))));
+
   const ctx = {
     page, context, base, lang: options.lang, state: {}, walkDir,
     url: p => new URL(p, base).toString(),
@@ -836,6 +892,10 @@ async function walk(o) {
     const loginRe = plan.login ? new RegExp(plan.login, 'i') : DEFAULT_LOGIN;
     const isReady = async () => plan.ready ? (await page.locator(plan.ready).count()) > 0 : !loginRe.test(page.url());
     const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+    // Each opening of the start page forgets what came before it: what the sign-in pages reported is not the walk's,
+    // what the start page reports after the sign-in belongs to step 1.
+    watching = true;
+    seen.clear();
     await ctx.goto(start);
     while (!closed && !(await isReady().catch(() => false))) {
       if (Date.now() > deadline) throw new Error('Sign-in was not completed within 15 minutes.');
@@ -844,6 +904,7 @@ async function walk(o) {
       await page.waitForURL(u => !loginRe.test(u.toString()), { timeout: LOGIN_TIMEOUT_MS }).catch(() => {});
       if (closed) break;
       await page.waitForTimeout(1500).catch(() => {});
+      seen.clear();
       await ctx.goto(start).catch(() => {});
     }
     if (closed) {
@@ -888,7 +949,7 @@ async function walk(o) {
             ],
           }));
           decision = res.a;
-          if (decision === 'stop') { record({ n, title: s.title, kind: 'approve', answer: 'stop', seconds: res.seconds }); stopped = true; break; }
+          if (decision === 'stop') { record({ n, title: s.title, kind: 'approve', answer: 'stop', seconds: res.seconds, browserErrors: seen.take() }); stopped = true; break; }
           if (decision === 'approved') record({ n, title: s.title, kind: 'approve', answer: 'approved', what, seconds: res.seconds });
         }
         if (decision !== 'approved') {
@@ -909,19 +970,21 @@ async function walk(o) {
       }
       // Stop pressed while the step waited for the box: checked here too, in case the plan caught the error itself.
       if (stopRequested) {
-        record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: 'stop', note: stopRequested.note || undefined });
+        record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: 'stop', note: stopRequested.note || undefined, browserErrors: seen.take() });
         stopped = true;
         break;
       }
       if (options.screens === 'all') { try { lastShot = await takeShot(n); } catch { /* keep going */ } }
 
-      // --auto: only a step whose automatic check passed without plan warnings goes on by itself, after a countdown.
-      const countdown = options.auto && auto && auto.ok && !warnings.length
+      // --auto: only a step whose automatic check passed without plan warnings or browser errors goes on by itself,
+      // after a countdown.
+      const countdown = options.auto && auto && auto.ok && !warnings.length && !seen.total()
         ? { seconds: AUTO_SECONDS, text: t.autoIn, hold: t.autoHold } : undefined;
       const res = await ask(panelFor(n, s, {
         auto,
         warnings,
         countdown,
+        errorsLive: true,
         expectLabel: expectLabel(t, marked),
         buttons: [
           { label: t.pass, value: 'pass', color: COLORS.pass, confirm: auto && !auto.ok ? t.passConfirm : undefined },
@@ -932,9 +995,11 @@ async function walk(o) {
       if (res.a === 'diff' && options.screens === 'diff' && !lastShot) { try { lastShot = await takeShot(n); } catch { /* keep going */ } }
       record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: res.a, note: res.note || undefined,
         auto: auto || undefined, againstCheck: (res.a === 'pass' && auto && !auto.ok) || undefined, error: runError ? firstLine(runError) : undefined, markMissing: markMissing || undefined,
-        warnings: warnings.length ? warnings : undefined, answeredBy: res.by, seconds: res.seconds, screenshot: lastShot || undefined });
+        warnings: warnings.length ? warnings : undefined, answeredBy: res.by, seconds: res.seconds, screenshot: lastShot || undefined,
+        browserErrors: seen.take() });
       if (res.a === 'stop') { stopped = true; break; }
     }
+    watching = false;
     shotIndex = null;
     await tracePause();
 
@@ -948,7 +1013,7 @@ async function walk(o) {
       header: format(t.step, { n: total, total }), accent: COLORS.info, t, didLabel: t.did, expectLabel: t.outcome,
       title: t.doneTitle, did: t.doneDid, shot: false,
       expect: [format(t.doneSummary, counts), ...(counts.auto ? [format(t.doneAuto, counts)] : []),
-        ...(counts.against ? [format(t.doneAgainst, counts)] : [])],
+        ...(counts.against ? [format(t.doneAgainst, counts)] : []), ...(counts.errorSteps ? [format(t.doneErrors, counts)] : [])],
       buttons: [
         { label: t.close, value: 'close', color: COLORS.info },
         ...(options.fresh ? [] : [{ label: t.signOut, value: 'signout', color: COLORS.stop }]),

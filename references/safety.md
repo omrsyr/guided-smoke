@@ -67,6 +67,10 @@ steps too (see writing-steps rule 8).
 ## What is recorded
 
 `events.jsonl` keeps step numbers and titles, answers, notes, automatic-check texts, plan warnings, durations, and
-screenshot paths. It never keeps page HTML, cookies, values typed into forms or the value box, or credentials. Screenshots are taken only on request
+screenshot paths. It never keeps page HTML, cookies, values typed into forms or the value box, or credentials.
+Browser errors are kept as counts and their first few entries: kind, method, path without query or fragment (an
+e-mail, a number of 6+ digits, a token or GUID in the path becomes `•••`; the host only for another origin), status,
+the error's type and the script's place; never a message text or a request or response body. While the value box is
+drawn, a request sent and any message logged keep no address, place or text at all; the panel shows them masked too. Screenshots are taken only on request
 (📷, `--screens diff|all`) and stay in the walk folder on this machine; they may show personal data, so treat them
 like the screen itself.

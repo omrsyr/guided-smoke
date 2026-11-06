@@ -1,12 +1,16 @@
 // The demo plan: `node engine/run.js demo` starts the demo application (server.js) and walks this plan against it.
 // It shows every kind of step: a plain one, a form submit, a validation the browser blocks, a download, the
 // application's own dialog, permitted steps that change data outside the page, a background job waited for with
-// poll(), and API calls with an account the user types into the value box. Copy the shapes; the selectors are the demo's.
-const { pickLanguage } = require('../../engine/i18n');
+// poll(), API calls with an account the user types into the value box, and a page whose background call fails (the
+// panel shows it). Copy the shapes; the selectors are the demo's.
+const { pickLanguage, texts } = require('../../engine/i18n');
+const { countsText } = require('../../engine/errors');
 const demo = require('./server');
 
 const lang = pickLanguage();
 const A = require('./texts')[lang];          // what the screen shows
+// What the panel shows under a step when the browser reported errors.
+const browser = counts => `⚠ ${texts(lang).errIn}${countsText(counts, texts(lang))}`;
 const future = demo.isoDay(30);
 
 const P = {
@@ -27,9 +31,9 @@ const P = {
     s9: ['Reminder written (waited for the job)', 'I counted the reminders in the demo\'s data, waiting up to 15 seconds for the job, then opened order 1001.', [`"✉ ${A.reminder}" under the order details.`]],
     s10: ['Value box ready', 'I added a box at the bottom left of the page for the demo API account.', [`Type the account shown in the "${A.apiAccount}" card into the box (e-mail and password), then click "Correct, continue".`, 'The script does not read the box; the values stay in the page.']],
     s11: ['API check answers "Valid"', 'With the box\'s account I signed in to the demo API and called POST /api/check for machine SMOKE-A.', ['The box shows http 200 and status "Valid".', 'The e-mail and the password appear nowhere in the result.']],
-    s12: ['A wrong password is refused', 'I called the API sign-in again with the box\'s password plus one character.', ['The box shows http 401 and the message "Invalid e-mail or password."']],
+    s12: ['A wrong password is refused', 'I called the API sign-in again with the box\'s password plus one character.', ['The box shows http 401 and the message "Invalid e-mail or password."', `Under the step the panel shows "${browser({ http: 1 })}" and "POST ••• → 401": the refused sign-in, its address masked because the value box is open.`]],
     s13: ['The calls are listed on the order page', `I reloaded order 1001 (the page load cleared the box), removed the box and outlined "${A.calls}".`, ['Newest first: login · Refused, check · SMOKE-A · Valid, login · SignedIn.']],
-    s14: ['Help page', `I opened "${A.help}" ▸ "${A.helpTitle}".`, [`The paragraph begins "${A.helpDue.split('. ')[0]}."`]],
+    s14: ['Help page', `I opened "${A.help}" ▸ "${A.helpTitle}".`, [`The paragraph begins "${A.helpDue.split('. ')[0]}."`, `Under the step the panel shows "${browser({ js: 1, http: 1 })}": the page loads its tips with GET /api/tips, which the demo fails on purpose. Nothing on the screen shows it.`]],
     boxTitle: 'Demo API account', email: 'E-mail', password: 'Password',
   },
   tr: {
@@ -49,9 +53,9 @@ const P = {
     s9: ['Hatırlatma yazıldı (iş beklendi)', 'Demonun verisinde hatırlatmaları saydım, iş için 15 saniyeye kadar bekledim, sonra 1001 numaralı siparişi açtım.', [`Sipariş bilgilerinin altında "✉ ${A.reminder}"`]],
     s10: ['Değer kutusu hazır', 'Sayfanın sol altına demo API hesabı için bir kutu ekledim.', [`"${A.apiAccount}" kartındaki hesabı (e-posta ve parola) kutuya yaz, sonra "Doğru, devam" de.`, 'Betik kutuyu okumaz; değerler sayfada kalır.']],
     s11: ['API kontrolü "Valid" diyor', 'Kutudaki hesapla demo API\'sine giriş yaptım ve SMOKE-A makinesi için POST /api/check çağırdım.', ['Kutuda http 200 ve status "Valid" görünüyor.', 'Sonuçta e-posta da parola da hiçbir yerde geçmiyor.']],
-    s12: ['Yanlış parola reddediliyor', 'API girişini kutudaki parolanın sonuna bir harf ekleyerek yeniden çağırdım.', ['Kutuda http 401 ve "Invalid e-mail or password." mesajı görünüyor.']],
+    s12: ['Yanlış parola reddediliyor', 'API girişini kutudaki parolanın sonuna bir harf ekleyerek yeniden çağırdım.', ['Kutuda http 401 ve "Invalid e-mail or password." mesajı görünüyor.', `Panelde adımın altında "${browser({ http: 1 })}" ve "POST ••• → 401" görünüyor: reddedilen giriş; değer kutusu açık olduğu için adresi maskeli.`]],
     s13: ['Çağrılar sipariş sayfasında listeleniyor', `1001 numaralı siparişi yeniledim (sayfa yüklenince kutu boşaldı), kutuyu kaldırdım ve "${A.calls}" kartını işaretledim.`, ['En yeni üstte: login · Refused, check · SMOKE-A · Valid, login · SignedIn.']],
-    s14: ['Yardım sayfası', `"${A.help}" ▸ "${A.helpTitle}" sayfasını açtım.`, [`Paragraf "${A.helpDue.split('. ')[0]}." diye başlıyor.`]],
+    s14: ['Yardım sayfası', `"${A.help}" ▸ "${A.helpTitle}" sayfasını açtım.`, [`Paragraf "${A.helpDue.split('. ')[0]}." diye başlıyor.`, `Panelde adımın altında "${browser({ js: 1, http: 1 })}" görünüyor: sayfa ipuçlarını GET /api/tips ile yüklüyor, demo bu çağrıyı bilerek düşürüyor. Ekranda hiçbir iz yok.`]],
     boxTitle: 'Demo API hesabı', email: 'E-posta', password: 'Parola',
   },
 }[lang];

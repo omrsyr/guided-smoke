@@ -11,6 +11,8 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-test-'));
 process.env.GUIDED_SMOKE_HOME = home;
 const store = require('../store');
 const report = require('../report');
+const errors = require('../errors');
+const { texts } = require('../i18n');
 const { isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
 const RUN = path.join(__dirname, '..', 'run.js');
 const P = 'demo';
@@ -188,6 +190,93 @@ test('the report marks steps passed by --auto and links recordings with a warnin
   assert.match(markdown, /1 of the passed steps went on by themselves \(--auto\)\./);
   assert.match(markdown, /\n✔ a \(by itself\)\n✔ b\n/);
   assert.match(markdown, /Recordings:\*\* \[trace-1\.zip\]\(trace-1\.zip\) · \[trace-2\.zip\]\(trace-2\.zip\) · \[video\/walk\.webm\]\(video\/walk\.webm\) \(.*do not attach/);
+});
+
+test('browser errors keep only what is safe: no query, id-like parts masked, no message texts, nothing at all while the box is open', () => {
+  const base = 'https://localhost:5001';
+  assert.strictEqual(errors.safeUrl('https://localhost:5001/api/orders/1001?token=abc#x', base), '/api/orders/1001');
+  assert.strictEqual(errors.safeUrl('https://localhost:5001/users/ali%40example.com/reset/eyJhbGciOiJIUzI1NiJ9abc', base), '/users/•••/reset/•••');
+  assert.strictEqual(errors.safeUrl('https://localhost:5001/product/6f1c2e9a-0b7d-4c55-9a51-8d2b3c4e5f60/v/12345678', base), '/product/•••/v/•••');
+  assert.strictEqual(errors.safeUrl('https://localhost:5001/api/customer-contact-emails/Account/ExternalLoginConfirmation', base), '/api/customer-contact-emails/Account/ExternalLoginConfirmation');
+  assert.strictEqual(errors.safeUrl('https://cdn.example.com/lib.js?v=3', base), 'cdn.example.com/lib.js');
+  assert.strictEqual(errors.safeUrl('data:image/png;base64,AAAA', base), 'data:…');
+  assert.strictEqual(errors.cleanText('Fetch API cannot load https://x.test/a?token=abc. Refused'), 'Fetch API cannot load https://x.test/a?… Refused');
+
+  // Chrome's echo of a failed request and a cancelled request are not errors of their own.
+  assert.strictEqual(errors.fromConsole({ type: 'error', text: 'Failed to load resource: the server responded with a status of 404 (Not Found)' }, base, false), null);
+  assert.strictEqual(errors.fromConsole({ type: 'warning', text: 'a warning' }, base, false), null);
+  assert.strictEqual(errors.fromFailed({ method: 'GET', url: `${base}/file`, errorText: 'net::ERR_ABORTED' }, base, false), null);
+  assert.strictEqual(errors.fromResponse({ method: 'GET', url: `${base}/`, status: 302 }, base, false), null);
+
+  const t = texts('en');
+  const b = new errors.Bucket();
+  b.add(errors.fromConsole({ type: 'error', text: 'Saving failed for ali@example.com', location: { url: `${base}/js/app.js?v=2`, lineNumber: 12 } }, base, false));
+  b.add(errors.fromPageError({ name: 'TypeError', message: 'x is undefined', stack: `TypeError: x is undefined\n    at f (${base}/js/app.js:40:7)` }, base, false));
+  for (let i = 0; i < 2; i++) b.add(errors.fromResponse({ method: 'GET', url: `${base}/api/tips?q=1`, status: 500 }, base, false));
+  b.add(errors.fromFailed({ method: 'POST', url: 'https://telemetry.example.com/e', errorText: 'net::ERR_NAME_NOT_RESOLVED' }, base, false));
+  b.add(errors.fromConsole({ type: 'error', text: 'login failed for box-secret-42' }, base, true));
+  b.add(errors.fromResponse({ method: 'POST', url: `${base}/api/users/box-secret-42`, status: 401 }, base, true));
+  const view = b.view(t);
+  assert.strictEqual(view.summary, '⚠ In the browser: 1 script error · 2 console errors · 4 failed requests');
+  assert.deepStrictEqual(view.lines, ['console.error: Saving failed for ali@example.com (/js/app.js:12)', 'TypeError: x is undefined (/js/app.js:40)', 'GET /api/tips → 500 ×2']);
+  assert.strictEqual(view.more, '… and 3 more');
+  const kept = b.take();
+  assert.deepStrictEqual({ ...kept, first: undefined }, { js: 1, console: 2, http: 3, failed: 1, ignored: 0, first: undefined });
+  assert.deepStrictEqual(kept.first, [
+    { kind: 'console', at: '/js/app.js:12' },
+    { kind: 'js', name: 'TypeError', at: '/js/app.js:40' },
+    { kind: 'http', method: 'GET', url: '/api/tips', status: 500, times: 2 },
+    { kind: 'failed', method: 'POST', url: 'telemetry.example.com/e', reason: 'net::ERR_NAME_NOT_RESOLVED' },
+    { kind: 'console', masked: true },
+  ]);
+  const text = JSON.stringify(kept);
+  for (const leak of ['ali@example.com', 'box-secret-42', 'Saving failed', 'x is undefined', '?q=']) assert.ok(!text.includes(leak), leak);
+  assert.strictEqual(b.take(), undefined, 'take() clears the bucket');
+});
+
+test('ignoreErrors leaves known noise out of the counts but says how much; bad patterns are refused', () => {
+  const base = 'https://localhost:5001';
+  const b = new errors.Bucket(errors.compileIgnore(['GET /hub/negotiate → 404', /telemetry/]));
+  // Matched against the panel's line with the box closed, so a masked request can still be recognised.
+  assert.strictEqual(b.add(errors.fromResponse({ method: 'GET', url: `${base}/hub/negotiate?id=1`, status: 404 }, base, true)), false);
+  assert.strictEqual(b.add(errors.fromFailed({ method: 'POST', url: 'https://telemetry.example.com/e', errorText: 'net::ERR_FAILED' }, base, false)), false);
+  assert.strictEqual(b.add(errors.fromResponse({ method: 'GET', url: `${base}/hub/other`, status: 404 }, base, false)), true);
+  assert.strictEqual(b.view(texts('tr')).ignored, '2 tanesi planda yok sayıldı (ignoreErrors)');
+  assert.deepStrictEqual(b.take(), { js: 0, console: 0, http: 1, failed: 0, ignored: 2, first: [{ kind: 'http', method: 'GET', url: '/hub/other', status: 404 }] });
+  for (const bad of ['(', '', 7]) assert.throws(() => errors.compileIgnore([bad]), /ignoreErrors\[0\]/);
+  assert.throws(() => errors.compileIgnore('GET'), /array/);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-ignore-'));
+  const file = path.join(dir, 'noisy.steps.js');
+  fs.writeFileSync(file, "module.exports = { ignoreErrors: ['('], steps: [{ title: 'a', run: async () => {} }] };");
+  try {
+    const r = cli('run', file);
+    assert.strictEqual(r.status, 2, r.stderr);
+    assert.match(r.stderr, /ignoreErrors\[0\]/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the report shows browser errors in the summary, the note column, a section of their own and the paste block', () => {
+  const meta = { totalSteps: 3, titles: ['a', 'b', 'c'], lang: 'en', walkId: 'e-1', planId: 'e', readyAt: '2026-11-03T08:00:00Z',
+    endedAt: '2026-11-03T08:00:10Z', measuredSeconds: 10, result: 'completed', browser: 'chrome', browserSource: 'requested', base: 'http://localhost' };
+  const events = [
+    { n: 1, title: 'a', answer: 'pass', browserErrors: { js: 1, console: 0, http: 7, failed: 0, ignored: 1, first: [
+      { kind: 'js', name: 'Error', at: '/app.js:3' }, { kind: 'http', method: 'GET', url: '/api/tips', status: 500, times: 2 },
+      { kind: 'http', method: 'POST', url: '•••', status: 401, masked: true }] } },
+    { n: 2, title: 'b', answer: 'pass', browserErrors: { js: 0, console: 0, http: 0, failed: 0, ignored: 2, first: [] } },
+    { n: 3, title: 'c', answer: 'diff', note: 'wrong' },
+  ];
+  const { markdown, errorSteps } = report.build(meta, events, null);
+  assert.deepStrictEqual(errorSteps, [1], 'a step with only ignored errors has none');
+  assert.match(markdown, /⚠ Steps where the browser reported errors: 1\./);
+  assert.match(markdown, /\| 1 \| a \| ✔ passed \|  \| ⚠ In the browser: 1 script error · 7 failed requests \|/);
+  assert.match(markdown, /\| 2 \| b \| ✔ passed \|  \|  \|/);
+  assert.match(markdown, /## Browser errors\n\n.*no query.*\n\n- 1\. a: `Error \(\/app\.js:3\)` · `GET \/api\/tips → 500 ×2` · `POST ••• → 401` · `\+4 more`\n\n3 more matched the plan's ignoreErrors/);
+  assert.match(markdown, /\n✔ a \(⚠ 8 browser errors\)\n✔ b\n✖ c — wrong\n/);
+  const old = report.build(meta, events.map(({ browserErrors, ...e }) => e), null).markdown;
+  assert.doesNotMatch(old, /Browser errors|In the browser|browser error/, 'a walk recorded before 1.2 reads as before');
 });
 
 test('--panel takes left or right and/or min, nothing else', () => {

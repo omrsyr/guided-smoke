@@ -10,9 +10,15 @@ rebuilds it. It contains:
   failed (also flagged in the note column and in the paste block). Mention them to the user; they still count as
   passed, since the user has the last word. With `--auto`, how many passed steps went on by themselves; those steps
   read "✔ passed (by itself)" in the table and the paste block. Say so when you summarise: the user did not look at them.
-- **Steps:** number, title, result (with the reason of a skip), automatic check, the user's note, screenshot link.
+  The steps where the browser reported errors.
+- **Steps:** number, title, result (with the reason of a skip), automatic check, the user's note (plan warnings and
+  the browser's error counts too), screenshot link.
+- **Browser errors** (only when there are any): per step the first ones as kept: kind, method, path, status, the
+  error's type and the script's place; how many more; how many the plan's `ignoreErrors` left out. Messages are not
+  in the records; "•••" alone means the value box was open.
 - **Compared with the previous walk** of the same plan: every step whose result changed (`✖ → ✔`).
-- **To paste into the work item:** a plain-text block with the ✔/✖ list and the measured time.
+- **To paste into the work item:** a plain-text block with the ✔/✖ list (with the browser's error count per step) and
+  the measured time.
 
 ## What to tell the user afterwards
 
@@ -20,6 +26,9 @@ Keep it short:
 
 1. The counts and the measured time.
 2. Every ✖ with the user's note, and what you think it means (a bug, a wrong expectation in the plan, test data).
+   Also every step with browser errors, even a ✔ one: the user judged the screen, the browser saw more. Say whether
+   the step expected them (a refused call) or they point at a bug (a 500, a script error); for recurring noise of
+   the environment, suggest `ignoreErrors`.
 3. The next action: fix and `--retry-failed`, or "all passed".
 
 ## Effort

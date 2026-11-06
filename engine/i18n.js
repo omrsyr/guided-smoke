@@ -53,6 +53,13 @@ const TEXTS = {
     boxUse: '✔ Use these values',
     boxWaitDid: 'This step uses the values in the box at the bottom left, and the box is not filled in yet.',
     boxWaitTodo: 'Fill in {fields} in the box, then press "{use}" there. The step goes on by itself.',
+    errIn: 'In the browser: ',
+    errJs: ['{n} script error', '{n} script errors'],
+    errConsole: ['{n} console error', '{n} console errors'],
+    errRequests: ['{n} failed request', '{n} failed requests'],
+    errMore: '… and {n} more',
+    errIgnored: '{n} left out by the plan (ignoreErrors)',
+    doneErrors: '⚠ The browser reported errors in {errorSteps} of the steps (see the report).',
   },
   tr: {
     step: 'Smoke {n} / {total}',
@@ -105,6 +112,13 @@ const TEXTS = {
     boxUse: '✔ Bu değerleri kullan',
     boxWaitDid: 'Bu adım sol alttaki kutudaki değerleri kullanıyor; kutu henüz dolu değil.',
     boxWaitTodo: 'Kutuda şunları doldur: {fields}. Sonra kutudaki "{use}" düğmesine bas; adım kendiliğinden sürer.',
+    errIn: 'Tarayıcıda: ',
+    errJs: ['{n} JS hatası', '{n} JS hatası'],
+    errConsole: ['{n} konsol hatası', '{n} konsol hatası'],
+    errRequests: ['{n} başarısız istek', '{n} başarısız istek'],
+    errMore: '… ve {n} tane daha',
+    errIgnored: '{n} tanesi planda yok sayıldı (ignoreErrors)',
+    doneErrors: '⚠ {errorSteps} adımda tarayıcı hata bildirdi (rapora bak).',
   },
 };
 
