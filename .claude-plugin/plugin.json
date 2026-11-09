@@ -1,7 +1,7 @@
 {
   "name": "guided-smoke",
   "displayName": "guided-smoke",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Human-in-the-loop smoke and acceptance tests (UAT walkthroughs) in a real browser: Playwright performs each step, an on-page panel explains what to check, nothing moves on until you confirm.",
   "author": { "name": "Ömer Soyer", "url": "https://github.com/omrsyr" },
   "homepage": "https://github.com/omrsyr/guided-smoke#readme",

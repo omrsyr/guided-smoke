@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 — 2026-11-09
 
 - **`--network`: what the network did, under each step.** A 🌐 line in the panel gives the step's requests, bytes on
   the wire and slowest call, followed by its strong findings, updated while the panel waits.
