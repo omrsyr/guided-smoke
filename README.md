@@ -33,7 +33,7 @@ checklist, clicking through it alone, or watching a script race past.
   connection string or stack trace in an error page, or personal data the screen may not need. The report adds the
   site's missing security headers and session cookie flags. Only names and numbers are kept, never a value.
 - Every answer is saved at once. The **report** lists what passed and what differed, the steps with browser errors,
-  the measured walk time, what changed since the previous walk, and a block to paste into your work item.
+  the measured walk time, what changed since each step was last walked, and a block to paste into your work item.
 - After a fix, `run 6655 --retry-failed` runs only the steps marked ✖.
 
 ## Requirements

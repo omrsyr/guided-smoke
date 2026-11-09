@@ -29,6 +29,8 @@ const MIN_NODE = 20;
 const VERSION = '1.3.1';
 
 const EXIT = { ok: 0, error: 1, usage: 2, runtime: 3, resolve: 4 };
+// How far back a report looks for the walk in which a step was last answered.
+const EARLIER_WALKS = 20;
 
 const FLAGS = {
   common: { project: 'value', json: 'bool', help: 'bool' },
@@ -191,16 +193,14 @@ function writeReport(project, planId, walkId) {
   const dir = store.walkDir(project, walkId);
   const meta = store.readJson(path.join(dir, 'walk.json'));
   if (!meta) throw new Error(`Walk ${walkId} has no walk.json.`);
-  const nums = store.walkNumbers(project, planId);
+  // The earlier walks, newest first: each step is compared with the walk in which it was last answered.
   const n = Number(walkId.slice(planId.length + 1));
-  const prevN = nums.filter(x => x < n).pop();
-  let prev = null;
-  if (prevN) {
-    const prevId = `${planId}-${prevN}`;
-    const prevMeta = store.readJson(path.join(store.walkDir(project, prevId), 'walk.json'));
-    if (prevMeta) prev = { meta: prevMeta, events: store.readEvents(project, prevId) };
-  }
-  const { markdown, counts, against, errorSteps, networkSteps } = report.build(meta, store.readEvents(project, walkId), prev);
+  const earlier = store.walkNumbers(project, planId).filter(x => x < n).reverse().slice(0, EARLIER_WALKS).map(x => {
+    const id = `${planId}-${x}`;
+    const m = store.readJson(path.join(store.walkDir(project, id), 'walk.json'));
+    return m && { meta: m, events: store.readEvents(project, id) };
+  }).filter(Boolean);
+  const { markdown, counts, against, errorSteps, networkSteps } = report.build(meta, store.readEvents(project, walkId), earlier.length ? earlier : null);
   const file = path.join(dir, 'report.md');
   fs.writeFileSync(file, markdown);
   return { file, markdown, counts, against, errorSteps, networkSteps, meta };

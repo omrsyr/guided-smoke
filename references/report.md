@@ -22,7 +22,10 @@ rebuilds it. It contains:
   headers that name the server, session cookie flags, text sent uncompressed. On a local address all of it is
   expected there, to be checked on the test or production server. The summary names the steps with findings, and the
   paste block counts them.
-- **Compared with the previous walk** of the same plan: every step whose result changed (`✖ → ✔`).
+- **Compared with earlier walks** of the same plan: every step whose result changed (`✖ → ✔`), each against the newest
+  earlier walk in which that step was answered ✔ or ✖, so a walk stopped early or a `--retry-failed` walk adds no
+  noise. The heading names the walks compared with, and with several each line names its own. Steps are matched by
+  title: a new step reads "new step", a moved step names its old number, a step no longer in the plan is listed.
 - **To paste into the work item:** a plain-text block with the ✔/✖ list (with the browser's error count per step) and
   the measured time.
 

@@ -28,7 +28,7 @@ const LABELS = {
     networkFindings: ['{n} network finding', '{n} network findings'],
     requests: 'Requests', size: 'Size', slowest: 'Slowest', findings: 'Findings',
     networkIgnored: '{count} requests matched the plan\'s network.ignore and are not counted.',
-    networkUnread: '{count} response bodies could not be read in time and were not looked into.', networkMore: '+{count} more',
+    networkUnread: '{count} response bodies could not be read (the page had moved on, or time ran out) and were not looked into.', networkMore: '+{count} more',
     expectedHere: 'expected in this environment',
     kinds: { 'secret-field': 'secret field', 'personal-field': 'personal data field', 'secret-param': 'secret in the address', 'conn-string': 'connection string', 'error-detail': 'error details', slow: 'slow', repeated: 'repeated', large: 'large' },
     site: 'Site', siteLocal: 'expected on this machine; check on the test or production server',
@@ -58,7 +58,7 @@ const LABELS = {
     networkFindings: ['{n} ağ bulgusu', '{n} ağ bulgusu'],
     requests: 'İstek', size: 'Boyut', slowest: 'En yavaş', findings: 'Bulgular',
     networkIgnored: '{count} istek planın network.ignore listesine uydu, sayılmadı.',
-    networkUnread: '{count} yanıt gövdesi zamanında okunamadı, içine bakılmadı.', networkMore: '+{count} tane daha',
+    networkUnread: '{count} yanıt gövdesi okunamadı (sayfa başka adrese geçmişti ya da süre doldu), içine bakılmadı.', networkMore: '+{count} tane daha',
     expectedHere: 'bu ortamda beklenir',
     kinds: { 'secret-field': 'hassas alan', 'personal-field': 'kişisel veri alanı', 'secret-param': 'adreste gizli değer', 'conn-string': 'bağlantı dizesi', 'error-detail': 'hata ayrıntısı', slow: 'yavaş', repeated: 'tekrar', large: 'büyük' },
     site: 'Site', siteLocal: 'bu makinede beklenir; test ya da canlı sunucuda kontrol et',
@@ -111,7 +111,8 @@ function counts(meta, states) {
 /**
  * @param {object} meta        walk.json
  * @param {object[]} events    events.jsonl
- * @param {object|null} prev   { meta, events } of the previous walk of the same plan
+ * @param {object[]|object|null} prev  earlier walks of the same plan, newest first, as { meta, events } (one alone is
+ *                                       taken as a list of one)
  * @returns {{ markdown: string, counts: object }}
  */
 function build(meta, events, prev) {
@@ -193,9 +194,10 @@ function build(meta, events, prev) {
 
   if (meta.network) lines.push(...networkSection(meta, states, L, t));
 
-  if (prev) {
-    const changes = compare(meta, states, prev, L);
-    lines.push('', `## ${L.compare} (${prev.meta.walkId})`, '');
+  const earlier = !prev ? [] : Array.isArray(prev) ? prev : [prev];
+  if (earlier.length) {
+    const { changes, against: base } = compare(meta, states, earlier, L);
+    lines.push('', `## ${L.compare} (${base.join(', ')})`, '');
     lines.push(...(changes.length ? changes : [L.noChange]));
   }
 
@@ -230,36 +232,61 @@ function stepKeys(meta, states) {
 }
 
 /**
- * What changed since the previous walk, step by step. A step is the same step when its title is: a plan that gained,
- * lost or moved steps keeps its comparison right, a new step says so, a step no longer in the plan is listed.
- * A plan translated or renamed throughout shares no title with its previous walk; with as many steps, they are then
- * matched by number.
+ * What changed, step by step, since the step was last walked. `earlier`: the plan's earlier walks, newest first. A step
+ * is compared with the newest walk in which it was answered ✔ or ✖, so a walk stopped early or a --retry-failed walk
+ * that ran a few steps does not make the others look new; without such a walk, with the newest one that holds it.
+ * A step is the same step when its title is: a plan that gained, lost or moved steps keeps its comparison right, a new
+ * step says so, a step no longer in the plan (as of the previous walk) is listed. A walk that shares no title with
+ * this one but has as many steps (the plan translated or renamed throughout) is matched by number.
+ * Returns the lines and the walks compared with, newest first.
  */
-function compare(meta, states, prev, L) {
-  const before = finalStates(prev.events);
+function compare(meta, states, earlier, L) {
   const now = stepKeys(meta, states);
-  const then = stepKeys(prev.meta, before);
-  const thenByKey = new Map([...then].map(([n, key]) => [key, n]));
-  const byNumber = ![...now.values()].some(key => thenByKey.has(key)) && meta.totalSteps === prev.meta.totalSteps;
+  const walks = earlier.map(w => {
+    const done = finalStates(w.events);
+    const keys = stepKeys(w.meta, done);
+    const byKey = new Map([...keys].map(([n, key]) => [key, n]));
+    const byNumber = ![...now.values()].some(key => byKey.has(key)) && w.meta.totalSteps === meta.totalSteps;
+    return { id: w.meta.walkId, done, keys, byKey, byNumber };
+  });
+  const baseline = (n, key) => {
+    let held = null;
+    for (const w of walks) {
+      const m = w.byNumber ? n : w.byKey.get(key);
+      if (m == null) continue;
+      const e = w.done.get(m);
+      const answer = e ? e.answer : 'none';
+      if (answer === 'pass' || answer === 'diff') return { w, m, answer };
+      if (!held) held = { w, m, answer };
+    }
+    return held;
+  };
   const icon = answer => ICON[answer] || ICON.none;
-  const lines = [];
+  const rows = [];
+  const used = new Set();
   for (const [n, key] of now) {
     const b = states.get(n);
     if (!b || b.reason === 'filter') continue;
-    const m = byNumber ? n : thenByKey.get(key);
-    if (m == null) {
-      lines.push(`- ${n}. ${cell(b.title)}: ${L.newStep} → ${icon(b.answer)}`);
+    const base = baseline(n, key);
+    if (!base) {
+      rows.push({ text: `- ${n}. ${cell(b.title)}: ${L.newStep} → ${icon(b.answer)}` });
       continue;
     }
-    const a = before.get(m);
-    const from = a ? a.answer : 'none';
-    if (from !== b.answer) lines.push(`- ${n}. ${cell(b.title)}: ${icon(from)} → ${icon(b.answer)}${m !== n ? ` (${L.wasStep.replace('{n}', m)})` : ''}`);
+    used.add(base.w.id);
+    if (base.answer !== b.answer) {
+      rows.push({ id: base.w.id, text: `- ${n}. ${cell(b.title)}: ${icon(base.answer)} → ${icon(b.answer)}${base.m !== n ? ` (${L.wasStep.replace('{n}', base.m)})` : ''}` });
+    }
   }
-  if (!byNumber) {
+  const against = walks.map(w => w.id).filter(id => used.has(id));
+  if (!against.length) against.push(walks[0].id);
+  // Several walks compared with: each line says which one.
+  const lines = rows.map(r => (against.length > 1 && r.id ? `${r.text} · ${r.id}` : r.text));
+  const last = walks[0];
+  if (!last.byNumber) {
     const current = new Set(now.values());
-    for (const [m, key] of then) if (!current.has(key)) lines.push(`- ${cell(key.replace(/#\d+$/, ''))}: ${L.removedStep.replace('{n}', m)}`);
+    for (const [m, key] of last.keys) if (!current.has(key)) lines.push(`- ${cell(key.replace(/#\d+$/, ''))}: ${L.removedStep.replace('{n}', m)}`);
   }
-  return lines;
+  return { changes: lines, against };
 }
 
 const code = text =>`\`${String(text).replace(/`/g, "'")}\``;

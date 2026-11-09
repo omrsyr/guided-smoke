@@ -26,7 +26,7 @@ page (a database row, a file, an e-mail) ask first. Under each step the panel al
 script errors, console errors and failed requests the browser reported, and with `--network` what the network did:
 slow, repeated or large calls, and secrets or personal data the application sends where it should not. Every answer is
 written down at once; the report says what passed, what differed, where the browser reported errors, how long the walk
-took and what changed since the previous walk.
+took and what changed since each step was last walked.
 
 ## Activation boundary
 

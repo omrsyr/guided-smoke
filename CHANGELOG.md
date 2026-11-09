@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **`--network` no longer reads a translation file's labels as secrets.** In the first walk on a real application, an
+  Angular translation file (`assets/i18n/tr.json`) was a critical "secret field" finding: its keys such as
+  `common.password` map to the label the screen shows. A translation file is now known by its folder (`i18n`, `l10n`,
+  `locales`, `lang`, `translations`) or by a language code as its name outside an API path (`en-US.json`), and its
+  field names are not read. A configuration file the page loads (`assets/config.json`) is still read: a key in it is
+  a real leak.
+- **Each step is compared with the walk in which it was last answered.** A report compared with the walk just before,
+  so after a walk stopped at its first step every step read "○ → ✔". The same noise followed a `--retry-failed` walk
+  that ran a few steps. A step is now compared with the newest earlier walk in which it got ✔ or ✖ (up to 20 walks
+  back).
+  - The heading names the walks compared with.
+  - When there are several, each line names its walk.
+  - "No longer in the plan" still refers to the walk just before.
+- **`--network` no longer adds up sizes the browser does not know.** The browser gives -1 for such answers. In
+  sign-in steps full of redirects, a step's size came out below zero.
+- The report says why a response body was not read: the page had moved on (a sign-in through the identity provider),
+  or time ran out.
+
 ## 1.3.1 — 2026-11-09
 
 - **The comparison with the previous walk follows a step by its title.** It matched steps by number, so in a plan

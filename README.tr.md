@@ -33,7 +33,7 @@ listesini okuman, tek başına tıklaman ya da hızla akıp giden bir betiği iz
   stack trace, ekranın belki gerektirmediği kişisel veri gibi bulgular. Rapor, sitenin eksik güvenlik başlıklarını ve
   oturum çerezi bayraklarını da ekler. Kayda yalnız adlar ve sayılar girer, hiçbir değer girmez.
 - Her cevap anında kaydedilir. **Rapor** geçeni ve farklı olanı, tarayıcının hata bildirdiği adımları, ölçülen koşu
-  süresini, önceki koşudan bu yana neyin değiştiğini ve iş kaydına yapıştırılacak bir bloğu verir.
+  süresini, her adımın en son cevap aldığı koşudan bu yana neyin değiştiğini ve iş kaydına yapıştırılacak bir bloğu verir.
 - Düzeltmeden sonra `run 6655 --retry-failed` yalnız ✖ işaretli adımları koşar.
 
 ## Gereksinimler

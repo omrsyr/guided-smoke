@@ -387,6 +387,19 @@ test('a step\'s network record: counts, bytes, the slowest call and findings; no
   assert.strictEqual(await net.take(), undefined);
 });
 
+test('a translation file\'s labels are not secret fields; a configuration file the page loads still is', async () => {
+  for (const [url, yes] of [['http://localhost:4200/assets/i18n/tr.json', true], ['https://app.test/locales/en-US.json', true], ['https://app.test/static/tr_TR.json', true],
+    ['https://app.test/translations/orders.json', true], ['https://app.test/assets/config.json', false], ['https://app.test/api/me.json', false], ['https://app.test/api/users', false]]) {
+    assert.strictEqual(network.translationFile(url), yes, url);
+  }
+  const base = 'http://localhost:4200';
+  const net = new network.Network({ base, config: network.compileConfig(), local: true });
+  net.finished(fakeRequest({ url: `${base}/assets/i18n/tr.json`, body: { common: { password: 'Parola' }, license: { online: { customerPassword: 'Müşteri parolası' } } } }), false);
+  net.finished(fakeRequest({ url: `${base}/assets/config.json`, body: { apiKey: 'shipped-key' } }), false);
+  const r = await net.take();
+  assert.deepStrictEqual(r.findings.map(f => [f.kind, f.url, f.keys]), [['secret-field', '/assets/config.json', ['$.apiKey']]]);
+});
+
 test('network site findings: missing security headers per page, headers that name the server, session cookie flags, uncompressed text', async () => {
   const net = new network.Network({ base: 'https://app.example.test', config: network.compileConfig(), local: false });
   net.finished(fakeRequest({ url: 'https://app.example.test/', type: 'document', body: `<html>${'x'.repeat(12000)}</html>`,
@@ -513,6 +526,25 @@ test('the comparison follows a step by its title when the plan gained, lost or m
   const tr = ['Aç', 'Kaydet', 'Kaydet', 'Sil', 'Yardım'];
   const translated = report.build(meta('p-3', tr, 'tr'), events(tr, ['pass', 'pass', 'pass', 'pass', 'pass']), prev).markdown;
   assert.strictEqual(translated.split(/## Önceki koşuyla fark[^\n]*\n\n/)[1].split('\n\n')[0], '- 2. Kaydet: ✖ → ✔');
+});
+
+test('each step is compared with the walk in which it was last answered: a walk stopped early or a partial re-run adds no noise', () => {
+  const titles = ['Prepare', 'Open', 'Save', 'Undo'];
+  const meta = walkId => ({ walkId, planId: 'p', totalSteps: 4, titles, lang: 'en', readyAt: '2026-11-09T08:00:00Z', endedAt: '2026-11-09T08:01:00Z',
+    measuredSeconds: 60, result: 'completed', browser: 'chrome', browserSource: 'requested', base: 'http://localhost' });
+  const walk = (walkId, answers) => ({ meta: meta(walkId), events: answers.map((answer, i) => answer && ({ n: i + 1, title: titles[i], answer, ...(answer === 'skip' ? { reason: 'filter' } : {}) })).filter(Boolean) });
+  const section = md => md.split(/## Compared with /)[1].split('\n\n## ')[0];
+  const full = walk('p-6', ['pass', 'pass', 'diff', 'pass']);
+  const stopped = walk('p-7', ['stop']);
+  const now = walk('p-8', ['pass', 'pass', 'pass', 'pass']);
+  // Walk 7 was stopped at its first step: every step is compared with walk 6.
+  assert.strictEqual(section(report.build(now.meta, now.events, [stopped, full]).markdown), '(p-6)\n\n- 3. Save: ✖ → ✔');
+  // A --retry-failed walk ran only "Save"; "Open" was last answered in walk 6. Two walks compared with: each line says which.
+  const retry = walk('p-7', ['skip', 'skip', 'pass', 'skip']);
+  const again = walk('p-8', ['pass', 'diff', 'diff', 'pass']);
+  assert.strictEqual(section(report.build(again.meta, again.events, [retry, full]).markdown), '(p-7, p-6)\n\n- 2. Open: ✔ → ✖ · p-6\n- 3. Save: ✔ → ✖ · p-7');
+  // Nothing changed since the step was last answered.
+  assert.strictEqual(section(report.build(full.meta, full.events, [stopped, walk('p-5', ['pass', 'pass', 'diff', 'pass'])]).markdown), '(p-5)\n\nNo change in results.');
 });
 
 test('a stopped walk shows the remaining steps as not run', () => {

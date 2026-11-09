@@ -46,6 +46,11 @@ const AUTH_PATH = /log-?in|sign-?in|token|oauth|connect|auth|session|refresh|ant
 // Personal data a screen may need, or may not: a warning for the person who sees the screen.
 const PERSONAL_FIELD = /(iban|tckn|tckimlikno|tcno|kimlikno|nationalid|identitynumber|ssn|socialsecuritynumber|passportno|passportnumber)$/;
 const CARD_FIELD = /^(cardnumber|creditcardnumber|creditcard)$/;
+// A translation file maps keys such as "password" to the label the screen shows: its values are never secrets. Known
+// by its folder (assets/i18n/tr.json, locales/en-US.json) or by a language code as its name outside an API path. A
+// configuration file the page loads (assets/config.json) is still read.
+const TRANSLATION_DIR = /\/(?:i18n|l10n|locales?|langs?|languages|translations?)\//i;
+const LOCALE_FILE = /\/[a-z]{2,3}(?:[-_][A-Za-z]{2,4})?\.json$/i;
 const PLACEHOLDER = /^[\s*•●xX#.-]*$/;
 
 // Query parameters that carry a secret: an address ends up in server logs, proxies and the browser's history.
@@ -120,6 +125,13 @@ function secretParams(raw) {
   const names = new Set();
   for (const [k, v] of url.searchParams) if (v && SECRET_PARAM.test(norm(k))) names.add(k.slice(0, 40));
   return [...names];
+}
+
+/** Whether an address is a translation file (its field names are labels, not data). */
+function translationFile(raw) {
+  let p;
+  try { p = new URL(raw).pathname; } catch { return false; }
+  return TRANSLATION_DIR.test(p) || (LOCALE_FILE.test(p) && !/\/api\//i.test(p));
 }
 
 /** What an error response's body gives away: part of a connection string, a stack trace, a database error. */
@@ -339,7 +351,8 @@ class Network {
   /** What needs the browser again: the size, then for the application's own answers the headers and the body. */
   async inspect(r, live) {
     let bytes = 0;
-    try { bytes = (await within(r.request.sizes(), PROTOCOL_MS)).responseBodySize || 0; } catch { /* the content-length below */ }
+    // The browser gives -1 for a size it does not know (a redirect, an answer from the cache): that is no size.
+    try { bytes = Math.max(0, (await within(r.request.sizes(), PROTOCOL_MS)).responseBodySize || 0); } catch { /* the content-length below */ }
     if (!r.response || r.masked || !r.own) {
       if (live()) this.addBytes(r, bytes);
       return;
@@ -361,7 +374,7 @@ class Network {
     const type = h['content-type'] || '';
     const length = Number(h['content-length']) || 0;
     const errorBody = r.status >= 400 && TEXTUAL.test(type) && length <= ERROR_MAX;
-    const fieldBody = r.status >= 200 && r.status < 300 && JSONISH.test(type) && length <= JSON_MAX;
+    const fieldBody = r.status >= 200 && r.status < 300 && JSONISH.test(type) && length <= JSON_MAX && !translationFile(r.raw);
     if (!errorBody && !fieldBody) return;
     let body;
     try { body = await within(r.response.body(), PROTOCOL_MS); } catch {
@@ -501,6 +514,6 @@ function findingTotal(record) {
 }
 
 module.exports = {
-  Network, compileConfig, sensitiveFields, secretParams, errorDetails, missingHeaders, revealingHeaders, cookieFlags,
+  Network, compileConfig, sensitiveFields, secretParams, errorDetails, missingHeaders, revealingHeaders, cookieFlags, translationFile,
   findingLine, findingTotal, size, time, SLOW_MS, PANEL_SLOW,
 };
