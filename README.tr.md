@@ -144,6 +144,8 @@ klasöründe kalır. Plan senin yetkilerinle çalışan koddur: yalnız okuduğu
 
 ## Geliştirme
 
+`main` yalnız yayınlanmış sürümleri taşır; geliştirme `next` dalında yapılır ve `main`'e bir sürümle girer.
+
 ```bash
 node --test engine/test/engine.test.js     # tarayıcı gerekmez
 node --test engine/test/demo.test.js       # demo, Chrome ya da Edge'de headless (setup gerekir)

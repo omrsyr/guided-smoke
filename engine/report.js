@@ -11,7 +11,7 @@ const LABELS = {
     title: 'Smoke report', plan: 'Plan', workItem: 'Work item', date: 'Date', measured: 'Measured walk time',
     measuredNote: 'sign-in wait excluded; your own extra checking is not included', browser: 'Browser', base: 'Address',
     result: 'Result', filter: 'Filter', summary: 'Summary', steps: 'Steps', step: 'Step', outcome: 'Result', auto: 'Automatic check',
-    note: 'Note', shot: 'Screenshot', compare: 'Compared with', noChange: 'No change in results.', paste: 'To paste into the work item',
+    note: 'Note', shot: 'Screenshot', compare: 'Compared with', noChange: 'No change in results.', newStep: 'new step', wasStep: 'was step {n}', removedStep: 'no longer in the plan (was step {n})', paste: 'To paste into the work item',
     pasteTitle: 'Smoke ({date}, {pass}/{run}; guided-smoke {walk})', notRun: 'not run', results: { completed: 'completed', stopped: 'stopped by the user', error: 'ended with an error', running: 'still running or interrupted' },
     against: '✔ given although the automatic check failed', againstSummary: '⚠ {count} passed although the automatic check failed: {steps}.',
     againstShort: 'automatic check failed',
@@ -41,7 +41,7 @@ const LABELS = {
     title: 'Smoke raporu', plan: 'Plan', workItem: 'İş', date: 'Tarih', measured: 'Ölçülen koşu süresi',
     measuredNote: 'giriş beklemesi hariç; senin ek incelemen dahil değil', browser: 'Tarayıcı', base: 'Adres',
     result: 'Sonuç', filter: 'Filtre', summary: 'Özet', steps: 'Adımlar', step: 'Adım', outcome: 'Sonuç', auto: 'Otomatik kontrol',
-    note: 'Not', shot: 'Görüntü', compare: 'Önceki koşuyla fark', noChange: 'Sonuçlarda değişiklik yok.', paste: 'İş kaydına yapıştırmak için',
+    note: 'Not', shot: 'Görüntü', compare: 'Önceki koşuyla fark', noChange: 'Sonuçlarda değişiklik yok.', newStep: 'yeni adım', wasStep: '{n}. adımdı', removedStep: 'artık planda yok ({n}. adımdı)', paste: 'İş kaydına yapıştırmak için',
     pasteTitle: 'Smoke ({date}, {pass}/{run}; guided-smoke {walk})', notRun: 'koşulmadı', results: { completed: 'tamamlandı', stopped: 'kullanıcı durdurdu', error: 'hatayla bitti', running: 'sürüyor ya da yarıda kesildi' },
     against: 'otomatik kontrol ✖ iken ✔ verildi', againstSummary: '⚠ {count} adım otomatik kontrol ✖ iken ✔ aldı: {steps}.',
     againstShort: 'otomatik kontrol ✖',
@@ -194,15 +194,7 @@ function build(meta, events, prev) {
   if (meta.network) lines.push(...networkSection(meta, states, L, t));
 
   if (prev) {
-    const before = finalStates(prev.events);
-    const changes = [];
-    for (let n = 1; n <= meta.totalSteps; n++) {
-      const a = before.get(n);
-      const b = states.get(n);
-      const from = a ? a.answer : 'none';
-      const to = b ? b.answer : 'none';
-      if (from !== to && b && !(b.reason === 'filter')) changes.push(`- ${n}. ${cell(b.title)}: ${ICON[from] || ICON.none} → ${ICON[to] || ICON.none}`);
-    }
+    const changes = compare(meta, states, prev, L);
     lines.push('', `## ${L.compare} (${prev.meta.walkId})`, '');
     lines.push(...(changes.length ? changes : [L.noChange]));
   }
@@ -224,7 +216,53 @@ function build(meta, events, prev) {
   return { markdown: lines.join('\n'), counts: c, against, errorSteps, networkSteps };
 }
 
-const code = text => `\`${String(text).replace(/`/g, "'")}\``;
+/** A walk's steps as "title#k" (the k-th step with that title), by number. */
+function stepKeys(meta, states) {
+  const keys = new Map();
+  const seen = new Map();
+  for (let n = 1; n <= meta.totalSteps; n++) {
+    const title = (meta.titles && meta.titles[n - 1]) || (states.get(n) && states.get(n).title) || '';
+    const k = (seen.get(title) || 0) + 1;
+    seen.set(title, k);
+    keys.set(n, `${title}#${k}`);
+  }
+  return keys;
+}
+
+/**
+ * What changed since the previous walk, step by step. A step is the same step when its title is: a plan that gained,
+ * lost or moved steps keeps its comparison right, a new step says so, a step no longer in the plan is listed.
+ * A plan translated or renamed throughout shares no title with its previous walk; with as many steps, they are then
+ * matched by number.
+ */
+function compare(meta, states, prev, L) {
+  const before = finalStates(prev.events);
+  const now = stepKeys(meta, states);
+  const then = stepKeys(prev.meta, before);
+  const thenByKey = new Map([...then].map(([n, key]) => [key, n]));
+  const byNumber = ![...now.values()].some(key => thenByKey.has(key)) && meta.totalSteps === prev.meta.totalSteps;
+  const icon = answer => ICON[answer] || ICON.none;
+  const lines = [];
+  for (const [n, key] of now) {
+    const b = states.get(n);
+    if (!b || b.reason === 'filter') continue;
+    const m = byNumber ? n : thenByKey.get(key);
+    if (m == null) {
+      lines.push(`- ${n}. ${cell(b.title)}: ${L.newStep} → ${icon(b.answer)}`);
+      continue;
+    }
+    const a = before.get(m);
+    const from = a ? a.answer : 'none';
+    if (from !== b.answer) lines.push(`- ${n}. ${cell(b.title)}: ${icon(from)} → ${icon(b.answer)}${m !== n ? ` (${L.wasStep.replace('{n}', m)})` : ''}`);
+  }
+  if (!byNumber) {
+    const current = new Set(now.values());
+    for (const [m, key] of then) if (!current.has(key)) lines.push(`- ${cell(key.replace(/#\d+$/, ''))}: ${L.removedStep.replace('{n}', m)}`);
+  }
+  return lines;
+}
+
+const code = text =>`\`${String(text).replace(/`/g, "'")}\``;
 
 /** The "Network" section: a row per step that ran with --network, its findings, then each of the application's sites. */
 function networkSection(meta, states, L, t) {

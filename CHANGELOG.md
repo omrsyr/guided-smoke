@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **The comparison with the previous walk follows a step by its title.** It matched steps by number, so in a plan
+  that gained, lost or moved a step every later step was compared with another one. A step is now the same step when
+  its title is; of two steps with the same title, the second stays the second.
+  - A new step reads "new step → ✔".
+  - A step that moved names its old number ("was step 2").
+  - A step no longer in the plan is listed.
+  - A plan translated or renamed throughout shares no title with its previous walk. With as many steps, it is still
+    matched by number.
+- `main` now holds released versions only. Work happens on `next` and reaches `main` with a release, so an install
+  from the marketplace or a clone of `main` never gets unreleased code.
+
 ## 1.3.0 — 2026-11-09
 
 - **`--network`: what the network did, under each step.** A 🌐 line in the panel gives the step's requests, bytes on

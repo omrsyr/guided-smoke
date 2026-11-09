@@ -492,6 +492,29 @@ test('the report counts final answers, compares with the previous walk and carri
   assert.doesNotMatch(markdown.split('To paste')[1], /three/, 'filtered steps stay out of the paste block');
 });
 
+test('the comparison follows a step by its title when the plan gained, lost or moved steps', () => {
+  const meta = (walkId, titles, lang = 'en') => ({ walkId, planId: 'p', totalSteps: titles.length, titles, lang, readyAt: '2026-11-09T08:00:00Z',
+    endedAt: '2026-11-09T08:01:00Z', measuredSeconds: 60, result: 'completed', browser: 'chrome', browserSource: 'requested', base: 'http://localhost' });
+  const events = (titles, answers) => titles.map((title, i) => ({ n: i + 1, title, answer: answers[i] }));
+  const section = md => md.split(/## Compared with[^\n]*\n\n/)[1].split('\n\n')[0];
+  const before = ['Open', 'Save', 'Save', 'Delete', 'Help'];
+  const prev = { meta: meta('p-1', before), events: events(before, ['pass', 'diff', 'pass', 'pass', 'pass']) };
+  // Two steps added in front and in the middle, "Delete" removed, the second "Save" still the second one.
+  const after = ['Sign-in note', 'Open', 'Save', 'Export', 'Save', 'Help'];
+  const { markdown } = report.build(meta('p-2', after), events(after, ['pass', 'pass', 'pass', 'pass', 'diff', 'pass']), prev);
+  assert.strictEqual(section(markdown), [
+    '- 1. Sign-in note: new step → ✔',
+    '- 3. Save: ✖ → ✔ (was step 2)',
+    '- 4. Export: new step → ✔',
+    '- 5. Save: ✔ → ✖ (was step 3)',
+    '- Delete: no longer in the plan (was step 4)',
+  ].join('\n'));
+  // The same plan in the other language shares no title: with as many steps, steps are matched by number.
+  const tr = ['Aç', 'Kaydet', 'Kaydet', 'Sil', 'Yardım'];
+  const translated = report.build(meta('p-3', tr, 'tr'), events(tr, ['pass', 'pass', 'pass', 'pass', 'pass']), prev).markdown;
+  assert.strictEqual(translated.split(/## Önceki koşuyla fark[^\n]*\n\n/)[1].split('\n\n')[0], '- 2. Kaydet: ✖ → ✔');
+});
+
 test('a stopped walk shows the remaining steps as not run', () => {
   const meta = { totalSteps: 3, titles: ['a', 'b', 'c'], lang: 'tr', walkId: 'x-1', planId: 'x', readyAt: '2026-11-03T08:00:00Z',
     endedAt: '2026-11-03T08:00:40Z', measuredSeconds: 40, result: 'stopped', browser: 'edge', browserSource: 'fallback', base: 'https://localhost' };

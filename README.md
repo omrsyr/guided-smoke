@@ -158,6 +158,8 @@ data folder of the machine that walked them. A plan is code that runs with your 
 
 ## Development
 
+`main` holds released versions only; work happens on the `next` branch and reaches `main` with a release.
+
 ```bash
 node --test engine/test/engine.test.js     # no browser needed
 node --test engine/test/demo.test.js       # the demo walked headless in Chrome or Edge (needs setup)
