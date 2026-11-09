@@ -4,6 +4,7 @@
 
 const { texts } = require('./i18n');
 const errors = require('./errors');
+const network = require('./network');
 
 const LABELS = {
   en: {
@@ -21,6 +22,20 @@ const LABELS = {
     errors: 'Browser errors', errorsNote: 'Counted from the browser: script errors, console errors, failed requests and HTTP errors (4xx/5xx). Only the kind, method, path (no query, id-like parts as •••), status and the script\'s place are kept; the messages were shown in the panel only. "•••" alone: the value box was open.',
     errorsIgnored: '{count} more matched the plan\'s ignoreErrors and are not counted.', errorsMore: '+{count} more',
     pasteErrors: ['{n} browser error', '{n} browser errors'],
+    network: 'Network', networkNote: 'Counted with --network over each step, from the previous answer to the step\'s answer: requests, bytes on the wire, the slowest call and findings. Kept are the method, path (no query, id-like parts as •••), status, time, size and the names of fields, parameters, headers and cookies; never a value or a body. "•••" alone: the value box was open, and that request was not looked into.',
+    networkSummary: '🌐 Network findings in steps: {steps}. See "Network".', networkCritical: '⛔ Critical network findings in steps: {steps}.',
+    networkNone: '🌐 Network: no findings.',
+    networkFindings: ['{n} network finding', '{n} network findings'],
+    requests: 'Requests', size: 'Size', slowest: 'Slowest', findings: 'Findings',
+    networkIgnored: '{count} requests matched the plan\'s network.ignore and are not counted.',
+    networkUnread: '{count} response bodies could not be read in time and were not looked into.', networkMore: '+{count} more',
+    expectedHere: 'expected in this environment',
+    kinds: { 'secret-field': 'secret field', 'personal-field': 'personal data field', 'secret-param': 'secret in the address', 'conn-string': 'connection string', 'error-detail': 'error details', slow: 'slow', repeated: 'repeated', large: 'large' },
+    site: 'Site', siteLocal: 'expected on this machine; check on the test or production server',
+    siteMissing: 'Missing security headers: {list}', sitePages: '{count}/{pages} pages', siteFrame: 'X-Frame-Options (or CSP frame-ancestors)',
+    siteRevealing: 'Headers that name the server or its version: {list}', siteNoHttpOnly: 'Session cookies without HttpOnly: {list}',
+    siteNoSecure: 'Session cookies without Secure: {list}', siteUncompressed: 'Text responses sent uncompressed: {count} (largest {call}, {size})',
+    siteNone: 'No findings.',
   },
   tr: {
     title: 'Smoke raporu', plan: 'Plan', workItem: 'İş', date: 'Tarih', measured: 'Ölçülen koşu süresi',
@@ -37,6 +52,20 @@ const LABELS = {
     errors: 'Tarayıcı hataları', errorsNote: 'Tarayıcıdan sayıldı: JS hataları, konsol hataları, düşen istekler ve HTTP hataları (4xx/5xx). Yalnız tür, yöntem, yol (sorgusuz, kimlik benzeri parçalar •••), durum kodu ve betiğin yeri tutulur; mesajlar yalnız panelde gösterildi. Tek başına "•••": değer kutusu açıktı.',
     errorsIgnored: '{count} tanesi daha planın ignoreErrors listesine uydu, sayılmadı.', errorsMore: '+{count} tane daha',
     pasteErrors: ['{n} tarayıcı hatası', '{n} tarayıcı hatası'],
+    network: 'Ağ', networkNote: '--network ile her adımda, önceki cevaptan adımın cevabına kadar sayıldı: istekler, ağdan geçen bayt, en yavaş çağrı ve bulgular. Yalnız yöntem, yol (sorgusuz, kimlik benzeri parçalar •••), durum kodu, süre, boyut ve alan, parametre, başlık ve çerez adları tutulur; hiçbir değer ya da gövde tutulmaz. Tek başına "•••": değer kutusu açıktı, o isteğin içine bakılmadı.',
+    networkSummary: '🌐 Ağ bulgusu olan adımlar: {steps}. Bkz. "Ağ".', networkCritical: '⛔ Kritik ağ bulgusu olan adımlar: {steps}.',
+    networkNone: '🌐 Ağ: bulgu yok.',
+    networkFindings: ['{n} ağ bulgusu', '{n} ağ bulgusu'],
+    requests: 'İstek', size: 'Boyut', slowest: 'En yavaş', findings: 'Bulgular',
+    networkIgnored: '{count} istek planın network.ignore listesine uydu, sayılmadı.',
+    networkUnread: '{count} yanıt gövdesi zamanında okunamadı, içine bakılmadı.', networkMore: '+{count} tane daha',
+    expectedHere: 'bu ortamda beklenir',
+    kinds: { 'secret-field': 'hassas alan', 'personal-field': 'kişisel veri alanı', 'secret-param': 'adreste gizli değer', 'conn-string': 'bağlantı dizesi', 'error-detail': 'hata ayrıntısı', slow: 'yavaş', repeated: 'tekrar', large: 'büyük' },
+    site: 'Site', siteLocal: 'bu makinede beklenir; test ya da canlı sunucuda kontrol et',
+    siteMissing: 'Eksik güvenlik başlıkları: {list}', sitePages: '{count}/{pages} sayfa', siteFrame: 'X-Frame-Options (ya da CSP frame-ancestors)',
+    siteRevealing: 'Sunucuyu ya da sürümünü söyleyen başlıklar: {list}', siteNoHttpOnly: 'HttpOnly olmayan oturum çerezleri: {list}',
+    siteNoSecure: 'Secure olmayan oturum çerezleri: {list}', siteUncompressed: 'Sıkıştırılmadan gönderilen metin yanıtları: {count} (en büyüğü {call}, {size})',
+    siteNone: 'Bulgu yok.',
   },
 };
 
@@ -96,6 +125,13 @@ function build(meta, events, prev) {
   const t = texts(lang);
   const errorSteps = [...states.values()].filter(e => errors.total(e.browserErrors)).map(e => e.n).sort((a, b) => a - b);
   const ignored = [...states.values()].reduce((sum, e) => sum + ((e.browserErrors && e.browserErrors.ignored) || 0), 0);
+  // What the network did (--network): counted findings per step; the ones a local walk expects are listed, not counted.
+  const networkSteps = [...states.values()].filter(e => network.findingTotal(e.network)).map(e => e.n).sort((a, b) => a - b);
+  const criticalSteps = [...states.values()].filter(e => e.network && e.network.critical).map(e => e.n).sort((a, b) => a - b);
+  const networkNote = e => {
+    const n = network.findingTotal(e.network);
+    return n ? `🌐 ${e.network.critical ? '⛔ ' : ''}${plural(n, L.networkFindings)}` : null;
+  };
   const plural = (n, [one, many]) => (n === 1 ? one : many).replace('{n}', n);
   const start = localTime(meta.readyAt || meta.startedAt);
   const end = localTime(meta.endedAt);
@@ -103,7 +139,8 @@ function build(meta, events, prev) {
 
   lines.push(`# ${L.title} — ${meta.walkId}`, '');
   lines.push(`- **${L.plan}:** ${meta.planId}${meta.title && meta.title !== meta.planId ? ` — ${meta.title}` : ''}`);
-  if (meta.workItem) lines.push(`- **${L.workItem}:** #${meta.workItem}`);
+  // "#6655" for a number (Azure DevOps, GitHub); a key such as PROJ-123 (Jira, Linear) as it is.
+  if (meta.workItem) lines.push(`- **${L.workItem}:** ${/^\d+$/.test(String(meta.workItem)) ? '#' : ''}${meta.workItem}`);
   lines.push(`- **${L.date}:** ${start.day} ${start.time}${end ? '–' + end.time : ''}`);
   lines.push(`- **${L.measured}:** ${duration(meta.measuredSeconds, lang)} (${L.measuredNote})`);
   lines.push(`- **${L.browser}:** ${meta.browser} (${meta.browserSource})${meta.locale ? ` · ${meta.locale}` : ''}`);
@@ -118,6 +155,10 @@ function build(meta, events, prev) {
   if (byAuto) lines.push('', L.autoSummary.replace('{count}', byAuto));
   if (against.length) lines.push('', L.againstSummary.replace('{count}', against.length).replace('{steps}', against.join(', ')));
   if (errorSteps.length) lines.push('', L.errorsSummary.replace('{steps}', errorSteps.join(', ')));
+  if (meta.network) {
+    if (criticalSteps.length) lines.push('', L.networkCritical.replace('{steps}', criticalSteps.join(', ')));
+    lines.push('', networkSteps.length ? L.networkSummary.replace('{steps}', networkSteps.join(', ')) : L.networkNone);
+  }
 
   lines.push('', `## ${L.steps}`, '');
   lines.push(`| # | ${L.step} | ${L.outcome} | ${L.auto} | ${L.note} | ${L.shot} |`);
@@ -133,7 +174,7 @@ function build(meta, events, prev) {
     }
     const auto = e && e.auto ? `${e.auto.ok ? '✔' : '✖'} ${e.auto.text}` : '';
     const browser = e && errors.total(e.browserErrors) ? `⚠ ${t.errIn}${errors.countsText(e.browserErrors, t)}` : null;
-    const note = e ? [e.answer === 'pass' && e.againstCheck ? `⚠ ${L.against}` : null, e.note, e.error, ...(e.warnings || []), browser].filter(Boolean).join(' · ') : '';
+    const note = e ? [e.answer === 'pass' && e.againstCheck ? `⚠ ${L.against}` : null, e.note, e.error, ...(e.warnings || []), browser, networkNote(e)].filter(Boolean).join(' · ') : '';
     const shot = e && e.screenshot ? `[${e.screenshot}](${e.screenshot})` : '';
     lines.push(`| ${n} | ${cell(title)} | ${cell(outcome)} | ${cell(auto)} | ${cell(note)} | ${shot} |`);
   }
@@ -149,6 +190,8 @@ function build(meta, events, prev) {
     }
     if (ignored) lines.push(...(errorSteps.length ? [''] : []), L.errorsIgnored.replace('{count}', ignored));
   }
+
+  if (meta.network) lines.push(...networkSection(meta, states, L, t));
 
   if (prev) {
     const before = finalStates(prev.events);
@@ -172,12 +215,60 @@ function build(meta, events, prev) {
     if (!e || e.answer === 'stop') continue;
     if (e.answer === 'skip' && e.reason === 'filter') continue;
     const browser = errors.total(e.browserErrors);
-    lines.push(`${ICON[e.answer]} ${e.title}${e.answeredBy === 'auto' ? ` (${L.byAuto})` : ''}${e.answer === 'pass' && e.againstCheck ? ` (⚠ ${L.againstShort})` : ''}${browser ? ` (⚠ ${plural(browser, L.pasteErrors)})` : ''}${e.note ? ` — ${e.note}` : ''}`);
+    const net = networkNote(e);
+    lines.push(`${ICON[e.answer]} ${e.title}${e.answeredBy === 'auto' ? ` (${L.byAuto})` : ''}${e.answer === 'pass' && e.againstCheck ? ` (⚠ ${L.againstShort})` : ''}${browser ? ` (⚠ ${plural(browser, L.pasteErrors)})` : ''}${net ? ` (${net})` : ''}${e.note ? ` — ${e.note}` : ''}`);
   }
   lines.push(`${L.measured}: ${duration(meta.measuredSeconds, lang)}`);
   lines.push('```', '');
 
-  return { markdown: lines.join('\n'), counts: c, against, errorSteps };
+  return { markdown: lines.join('\n'), counts: c, against, errorSteps, networkSteps };
+}
+
+const code = text => `\`${String(text).replace(/`/g, "'")}\``;
+
+/** The "Network" section: a row per step that ran with --network, its findings, then each of the application's sites. */
+function networkSection(meta, states, L, t) {
+  const lines = ['', `## ${L.network}`, '', L.networkNote, ''];
+  const ran = [...states.values()].filter(e => e.network).sort((a, b) => a.n - b.n);
+  if (ran.length) {
+    lines.push(`| # | ${L.step} | ${L.requests} | ${L.size} | ${L.slowest} | ${L.findings} |`, '|---|---|---|---|---|---|');
+    for (const e of ran) {
+      const r = e.network;
+      const slowest = r.slowest ? `${r.slowest.method} ${r.slowest.url} ${network.time(r.slowest.ms, t)}` : '';
+      const found = (r.findings || []).filter(f => !f.env).map(f => `${f.level === 'critical' ? '⛔' : '⚠'} ${L.kinds[f.kind] || f.kind}${f.kind === 'repeated' ? ` ×${f.times}` : ''}`);
+      lines.push(`| ${e.n} | ${cell(e.title)} | ${r.requests} | ${network.size(r.bytes, t)} | ${cell(slowest)} | ${cell(found.join(' · '))} |`);
+    }
+    const detailed = ran.filter(e => (e.network.findings || []).length);
+    if (detailed.length) lines.push('');
+    for (const e of detailed) {
+      const r = e.network;
+      const parts = r.findings.map(f => code(`${network.findingLine(f, t)}${f.env ? ` (${L.expectedHere})` : ''}`));
+      if (r.more) parts.push(code(L.networkMore.replace('{count}', r.more)));
+      lines.push(`- ${e.n}. ${cell(e.title)}: ${parts.join(' · ')}`);
+    }
+    const ignored = ran.reduce((sum, e) => sum + (e.network.ignored || 0), 0);
+    const unread = ran.reduce((sum, e) => sum + (e.network.unread || 0), 0);
+    if (ignored || unread) lines.push('');
+    if (ignored) lines.push(L.networkIgnored.replace('{count}', ignored));
+    if (unread) lines.push(L.networkUnread.replace('{count}', unread));
+  }
+  for (const [origin, s] of Object.entries(meta.network.sites || {})) {
+    lines.push('', `### ${L.site} — ${origin}${meta.network.local ? ` (${L.siteLocal})` : ''}`, '');
+    const items = [];
+    const missing = Object.entries(s.missing || {});
+    if (missing.length) {
+      items.push(L.siteMissing.replace('{list}', missing.map(([name, count]) => `${name === 'X-Frame-Options' ? L.siteFrame : name} (${L.sitePages.replace('{count}', count).replace('{pages}', s.pages)})`).join(', ')));
+    }
+    if ((s.revealing || []).length) items.push(L.siteRevealing.replace('{list}', s.revealing.join(', ')));
+    if ((s.noHttpOnly || []).length) items.push(L.siteNoHttpOnly.replace('{list}', s.noHttpOnly.join(', ')));
+    if ((s.noSecure || []).length) items.push(L.siteNoSecure.replace('{list}', s.noSecure.join(', ')));
+    if (s.uncompressed) {
+      const big = s.uncompressed.largest;
+      items.push(L.siteUncompressed.replace('{count}', s.uncompressed.count).replace('{call}', `${big.method} ${big.url}`).replace('{size}', network.size(big.bytes, t)));
+    }
+    lines.push(...(items.length ? items.map(i => `- ${i}`) : [L.siteNone]));
+  }
+  return lines;
 }
 
 module.exports = { build, finalStates, counts, duration };

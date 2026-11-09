@@ -2,9 +2,11 @@
 // It shows every kind of step: a plain one, a form submit, a validation the browser blocks, a download, the
 // application's own dialog, permitted steps that change data outside the page, a background job waited for with
 // poll(), API calls with an account the user types into the value box, and a page whose background call fails (the
-// panel shows it). Copy the shapes; the selectors are the demo's.
+// panel shows it; with --network also what its other background calls send and cost). Copy the shapes; the selectors
+// are the demo's.
 const { pickLanguage, texts } = require('../../engine/i18n');
 const { countsText } = require('../../engine/errors');
+const { findingLine } = require('../../engine/network');
 const demo = require('./server');
 
 const lang = pickLanguage();
@@ -12,6 +14,11 @@ const A = require('./texts')[lang];          // what the screen shows
 // What the panel shows under a step when the browser reported errors.
 const browser = counts => `⚠ ${texts(lang).errIn}${countsText(counts, texts(lang))}`;
 const future = demo.isoDay(30);
+// run.js demo --network sets this: step 14 then says what the network shows there, in the panel's own words.
+const network = process.env.GUIDED_SMOKE_DEMO_NETWORK === '1';
+const netLine = f => findingLine(f, texts(lang));
+const profileLeak = netLine({ kind: 'secret-field', level: 'critical', method: 'GET', url: '/api/profile', keys: ['$.passwordHash'] });
+const settingsTwice = netLine({ kind: 'repeated', level: 'warn', method: 'GET', url: '/api/settings', times: 3 });
 
 const P = {
   en: {
@@ -34,6 +41,7 @@ const P = {
     s12: ['A wrong password is refused', 'I called the API sign-in again with the box\'s password plus one character.', ['The box shows http 401 and the message "Invalid e-mail or password."', `Under the step the panel shows "${browser({ http: 1 })}" and "POST ••• → 401": the refused sign-in, its address masked because the value box is open.`]],
     s13: ['The calls are listed on the order page', `I reloaded order 1001 (the page load cleared the box), removed the box and outlined "${A.calls}".`, ['Newest first: login · Refused, check · SMOKE-A · Valid, login · SignedIn.']],
     s14: ['Help page', `I opened "${A.help}" ▸ "${A.helpTitle}".`, [`The paragraph begins "${A.helpDue.split('. ')[0]}."`, `Under the step the panel shows "${browser({ js: 1, http: 1 })}": the page loads its tips with GET /api/tips, which the demo fails on purpose. Nothing on the screen shows it.`]],
+    s14network: `With --network the panel also shows "${profileLeak}" (the profile call sends a password hash) and "${settingsTwice}"; once GET /api/help/stats has finished (about 1.5 s), the 🌐 line names it the slowest call.`,
     boxTitle: 'Demo API account', email: 'E-mail', password: 'Password',
   },
   tr: {
@@ -56,6 +64,7 @@ const P = {
     s12: ['Yanlış parola reddediliyor', 'API girişini kutudaki parolanın sonuna bir harf ekleyerek yeniden çağırdım.', ['Kutuda http 401 ve "Invalid e-mail or password." mesajı görünüyor.', `Panelde adımın altında "${browser({ http: 1 })}" ve "POST ••• → 401" görünüyor: reddedilen giriş; değer kutusu açık olduğu için adresi maskeli.`]],
     s13: ['Çağrılar sipariş sayfasında listeleniyor', `1001 numaralı siparişi yeniledim (sayfa yüklenince kutu boşaldı), kutuyu kaldırdım ve "${A.calls}" kartını işaretledim.`, ['En yeni üstte: login · Refused, check · SMOKE-A · Valid, login · SignedIn.']],
     s14: ['Yardım sayfası', `"${A.help}" ▸ "${A.helpTitle}" sayfasını açtım.`, [`Paragraf "${A.helpDue.split('. ')[0]}." diye başlıyor.`, `Panelde adımın altında "${browser({ js: 1, http: 1 })}" görünüyor: sayfa ipuçlarını GET /api/tips ile yüklüyor, demo bu çağrıyı bilerek düşürüyor. Ekranda hiçbir iz yok.`]],
+    s14network: `--network ile panel ayrıca "${profileLeak}" (profil çağrısı bir parola özeti gönderiyor) ve "${settingsTwice}" satırlarını gösteriyor; GET /api/help/stats bitince (yaklaşık 1,5 sn) 🌐 satırı onu en yavaş çağrı olarak gösteriyor.`,
     boxTitle: 'Demo API hesabı', email: 'E-posta', password: 'Parola',
   },
 }[lang];
@@ -217,6 +226,7 @@ module.exports = {
     },
     {
       ...step(P.s14),
+      ...(network ? { expect: [...P.s14[2], P.s14network] } : {}),
       run: async ({ page, goto, mark }) => {
         await goto('/help/orders');
         await mark(page.locator('#help-due'));

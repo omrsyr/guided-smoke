@@ -87,14 +87,17 @@ function line(e, full) {
   return full && e.text ? `${head}: ${e.text}${at}` : `${head}${at}`;
 }
 
-/** The plan's ignoreErrors as regular expressions; a string is a pattern, case-insensitive. Throws on a bad entry. */
-function compileIgnore(list) {
+/**
+ * A plan's list of patterns (ignoreErrors, network.ignore) as regular expressions; a string is a pattern,
+ * case-insensitive. Throws on a bad entry, naming it.
+ */
+function compileIgnore(list, name = 'ignoreErrors') {
   if (list == null) return [];
-  if (!Array.isArray(list)) throw new Error('ignoreErrors must be an array of regular expressions or pattern strings.');
+  if (!Array.isArray(list)) throw new Error(`${name} must be an array of regular expressions or pattern strings.`);
   return list.map((p, i) => {
     if (p instanceof RegExp) return p;
-    if (typeof p !== 'string' || !p) throw new Error(`ignoreErrors[${i}] must be a regular expression or a pattern string.`);
-    try { return new RegExp(p, 'i'); } catch (e) { throw new Error(`ignoreErrors[${i}]: ${e.message}`); }
+    if (typeof p !== 'string' || !p) throw new Error(`${name}[${i}] must be a regular expression or a pattern string.`);
+    try { return new RegExp(p, 'i'); } catch (e) { throw new Error(`${name}[${i}]: ${e.message}`); }
   });
 }
 
@@ -186,4 +189,4 @@ function recordLine(r) {
   return r.times > 1 ? `${l} ×${r.times}` : l;
 }
 
-module.exports = { Bucket, fromConsole, fromPageError, fromResponse, fromFailed, compileIgnore, countsText, total, recordLine, safeUrl, cleanText, MASK };
+module.exports = { Bucket, fromConsole, fromPageError, fromResponse, fromFailed, compileIgnore, countsText, total, recordLine, safeUrl, cleanText, plural, MASK, ABORTED };

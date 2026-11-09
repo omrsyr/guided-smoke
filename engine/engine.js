@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 const { texts, format } = require('./i18n');
 const { Bucket, fromConsole, fromPageError, fromResponse, fromFailed, compileIgnore, total: errorTotal } = require('./errors');
+const { Network, findingTotal } = require('./network');
 
 const PACE = { slow: 400, normal: 200, fast: 60 };
 const DEFAULT_LOGIN = /(login|signin|sign-in|giris|auth|account\/)/i;
@@ -68,8 +69,9 @@ function installUiHost() {
 
 // Runs in the page. Draws the panel; every text goes in through textContent, never as HTML.
 // s.side puts it at the bottom left or right; s.min starts it minimized; s.countdown (--auto) answers ✔ by itself when
-// the time is up, unless the user presses any button first. s.errors is what the browser reported during the step;
-// errors that arrive later are shown at once (updateErrors) and stop the countdown.
+// the time is up, unless the user presses any button first. s.errors is what the browser reported during the step,
+// s.network (--network) what the network did; what arrives later is shown at once (updateErrors). A browser error or
+// a critical network finding stops the countdown.
 function drawPanel(s) {
   const old = document.getElementById('__guided_smoke');
   if (old) old.remove();
@@ -112,6 +114,9 @@ function drawPanel(s) {
   const errs = el('div');
   errs.setAttribute('data-guided-smoke-errors', '');
   body.appendChild(errs);
+  const nets = el('div');
+  nets.setAttribute('data-guided-smoke-network', '');
+  body.appendChild(nets);
   let timer = null;
   let line = null;
   let hold = null;
@@ -195,8 +200,20 @@ function drawPanel(s) {
     }
     if (v.ignored) errs.appendChild(el('div', v.ignored, { marginTop: v.total ? '2px' : '8px', fontSize: '12px', color: '#6c757d' }));
   };
+  const showNetwork = v => {
+    nets.textContent = '';
+    if (!v) return;
+    if (v.critical) stopCountdown();
+    nets.appendChild(el('div', v.summary, { marginTop: '8px', fontWeight: '600', color: '#495057' }));
+    if (!v.lines.length) return;
+    const list = el('div', null, { font: '12px/1.4 Consolas, monospace', marginTop: '2px', wordBreak: 'break-word' });
+    v.lines.forEach(l => list.appendChild(el('div', l.text, l.level === 'critical' ? { color: '#dc3545', fontWeight: '600' } : { color: '#b35c00' })));
+    if (v.more) list.appendChild(el('div', v.more, { color: '#495057' }));
+    nets.appendChild(list);
+  };
   showErrors(s.errors);
-  box.__guidedSmokeErrors = showErrors;
+  showNetwork(s.network);
+  box.__guidedSmokeErrors = v => { showErrors(v.errors); showNetwork(v.network); };
   if (s.shot) {
     const shot = el('button', s.t.shot, { background: '#fff', color: '#0d6efd', border: '1px solid #0d6efd', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer' });
     shot.onclick = async () => {
@@ -300,7 +317,8 @@ function drawBox(s) {
   box.__guidedSmokeWaiting = waiting;
 }
 
-// Runs in the page. Shows the step's browser errors in the drawn panel without redrawing it, so a note being typed stays.
+// Runs in the page. Shows the step's browser errors and network view ({ errors, network }) in the drawn panel without
+// redrawing it, so a note being typed stays.
 function updateErrors(view) {
   const panel = document.getElementById('__guided_smoke');
   if (panel && panel.__guidedSmokeErrors) panel.__guidedSmokeErrors(view);
@@ -486,7 +504,7 @@ function firstLine(error) {
  * @param {object} o.playwright playwright-core
  * @param {object} o.options    { browser, base, pace, allowed:Set|null, filterNote, skipWrites, allowRemoteWrites, workItem,
  *                                fresh, screens:'diff'|'all'|null, locale, lang, keepDownloads, auto, trace, video,
- *                                panel: { side:'left'|'right', min } }
+ *                                panel: { side:'left'|'right', min }, network: compileConfig(plan.network)|null }
  */
 async function walk(o) {
   const { plan, planId, walkId, project, walkDir, playwright, options } = o;
@@ -500,9 +518,12 @@ async function walk(o) {
   const screensDir = path.join(walkDir, 'screens');
   const downloadsDir = path.join(walkDir, 'downloads');
   const videoDir = path.join(walkDir, 'video');
-  const counts = { pass: 0, diff: 0, skip: 0, against: 0, auto: 0, errorSteps: 0 };
-  // What the browser reports during a step: collected from the previous answered step to this step's answer.
+  const counts = { pass: 0, diff: 0, skip: 0, against: 0, auto: 0, errorSteps: 0, networkSteps: 0, networkCritical: 0 };
+  // What the browser reports during a step: collected from the previous answered step to this step's answer. The
+  // network (--network) over the same window.
   const seen = new Bucket(compileIgnore(plan.ignoreErrors));
+  let live = () => {};
+  const net = options.network ? new Network({ base, config: options.network, local: !remote, onChange: () => live() }) : null;
   const side = options.panel && options.panel.side === 'left' ? 'left' : 'right';
   let panelMin = !!(options.panel && options.panel.min);
 
@@ -513,9 +534,12 @@ async function walk(o) {
     filter: options.filterNote || null, skipWrites: !!options.skipWrites, allowRemoteWrites: !!options.allowRemoteWrites,
     auto: !!options.auto, trace: !!options.trace, video: !!options.video, traces: [], videos: [],
     totalSteps: total, titles: steps.map(s => s.title), startedAt: new Date().toISOString(), readyAt: null, endedAt: null,
-    measuredSeconds: null, result: 'running',
+    measuredSeconds: null, result: 'running', ...(net ? { network: net.summary() } : {}),
   };
-  const saveMeta = () => fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
+  const saveMeta = () => {
+    if (net) meta.network = net.summary();
+    fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
+  };
   saveMeta();
 
   const record = event => {
@@ -526,7 +550,10 @@ async function walk(o) {
     if (event.answeredBy === 'auto') counts.auto++;
     const browserErrors = errorTotal(event.browserErrors);
     if (browserErrors) counts.errorSteps++;
-    console.log(`[${event.n}] ${event.answer}${event.reason ? ' (' + event.reason + ')' : ''}${event.note ? ' — ' + event.note : ''}${browserErrors ? ` · browser errors: ${browserErrors}` : ''}`);
+    const network = findingTotal(event.network);
+    if (network) counts.networkSteps++;
+    if (event.network && event.network.critical) counts.networkCritical++;
+    console.log(`[${event.n}] ${event.answer}${event.reason ? ' (' + event.reason + ')' : ''}${event.note ? ' — ' + event.note : ''}${browserErrors ? ` · browser errors: ${browserErrors}` : ''}${network ? ` · network findings: ${network}${event.network.critical ? ` (critical: ${event.network.critical})` : ''}` : ''}`);
   };
 
   const profile = options.fresh ? fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-')) : o.profile;
@@ -637,8 +664,9 @@ async function walk(o) {
   };
 
   await context.exposeFunction('__guidedSmokeAnswer', async (a, note, by) => {
-    // The countdown ran out just before an error reached the panel: the step waits for the user after all.
-    if (by === 'auto' && current && current.errorsLive && seen.total()) { await draw(current); return; }
+    // The countdown ran out just before an error or a critical network finding reached the panel: the step waits for
+    // the user after all.
+    if (by === 'auto' && current && current.errorsLive && (seen.total() || (net && net.critical()))) { await draw(current); return; }
     if (pending) { const r = pending; pending = null; r({ a, note, by: by === 'auto' ? 'auto' : undefined }); }
   });
   await context.exposeFunction('__guidedSmokeMin', on => { panelMin = !!on; });
@@ -656,8 +684,9 @@ async function walk(o) {
   // A navigation wipes the panel and the value box; draw them again. The box comes back empty: its values are gone.
   let box = null;
   // Every panel takes the walk's corner and the user's last minimize choice (--panel sets both at the start); a step's
-  // panel also the browser errors seen so far.
-  const dressed = panel => ({ ...panel, side, min: panelMin, ...(panel.errorsLive ? { errors: seen.view(t) } : {}) });
+  // panel also the browser errors and the network seen so far.
+  const stepView = () => ({ errors: seen.view(t), network: net ? net.view(t) : null });
+  const dressed = panel => ({ ...panel, side, min: panelMin, ...(panel.errorsLive ? stepView() : {}) });
   page.on('load', async () => {
     if (box) { try { await page.evaluate(drawBox, box); } catch { /* page still loading */ } }
     if (current) { try { await page.evaluate(drawPanel, dressed(current)); } catch { /* page still loading */ } }
@@ -827,24 +856,34 @@ async function walk(o) {
   // sent while the value box is drawn, and any message logged meanwhile, are kept without address or text.
   let watching = false;
   const boxRequests = new WeakSet();
+  const looking = () => watching && !stopRequested && !closed;
   let liveQueued = false;
-  const saw = entry => {
-    if (!entry || !watching || stopRequested || closed) return;
-    seen.add(entry);
+  live = () => {
     if (liveQueued) return;
     liveQueued = true;
     setTimeout(() => {
       liveQueued = false;
-      if (current && current.errorsLive) page.evaluate(updateErrors, seen.view(t)).catch(() => {});
+      if (current && current.errorsLive) page.evaluate(updateErrors, stepView()).catch(() => {});
     }, 100);
   };
+  const saw = entry => {
+    if (!entry || !looking()) return;
+    seen.add(entry);
+    live();
+  };
   context.on('request', r => { if (box) boxRequests.add(r); });
+  if (net) {
+    context.on('requestfinished', r => { if (looking()) net.finished(r, !!box || boxRequests.has(r)); });
+    context.on('requestfailed', r => { if (looking()) net.failed(r, !!box || boxRequests.has(r)); });
+  }
   context.on('console', m => saw(fromConsole({ type: m.type(), text: m.text(), location: m.location() }, base, !!box)));
   context.on('weberror', w => saw(fromPageError(w.error(), base, !!box)));
   context.on('response', r => {
     if (r.status() >= 400) saw(fromResponse({ method: r.request().method(), url: r.url(), status: r.status() }, base, !!box || boxRequests.has(r.request())));
   });
   context.on('requestfailed', r => saw(fromFailed({ method: r.method(), url: r.url(), errorText: (r.failure() || {}).errorText }, base, !!box || boxRequests.has(r))));
+  // The step's network record: waits up to a second for bodies still being read.
+  const takeNetwork = async () => (net ? net.take() : undefined);
 
   const ctx = {
     page, context, base, lang: options.lang, state: {}, walkDir,
@@ -896,6 +935,7 @@ async function walk(o) {
     // what the start page reports after the sign-in belongs to step 1.
     watching = true;
     seen.clear();
+    if (net) net.clear();
     await ctx.goto(start);
     while (!closed && !(await isReady().catch(() => false))) {
       if (Date.now() > deadline) throw new Error('Sign-in was not completed within 15 minutes.');
@@ -905,6 +945,7 @@ async function walk(o) {
       if (closed) break;
       await page.waitForTimeout(1500).catch(() => {});
       seen.clear();
+      if (net) net.clear();
       await ctx.goto(start).catch(() => {});
     }
     if (closed) {
@@ -949,7 +990,7 @@ async function walk(o) {
             ],
           }));
           decision = res.a;
-          if (decision === 'stop') { record({ n, title: s.title, kind: 'approve', answer: 'stop', seconds: res.seconds, browserErrors: seen.take() }); stopped = true; break; }
+          if (decision === 'stop') { record({ n, title: s.title, kind: 'approve', answer: 'stop', seconds: res.seconds, browserErrors: seen.take(), network: await takeNetwork() }); stopped = true; break; }
           if (decision === 'approved') record({ n, title: s.title, kind: 'approve', answer: 'approved', what, seconds: res.seconds });
         }
         if (decision !== 'approved') {
@@ -970,15 +1011,15 @@ async function walk(o) {
       }
       // Stop pressed while the step waited for the box: checked here too, in case the plan caught the error itself.
       if (stopRequested) {
-        record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: 'stop', note: stopRequested.note || undefined, browserErrors: seen.take() });
+        record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: 'stop', note: stopRequested.note || undefined, browserErrors: seen.take(), network: await takeNetwork() });
         stopped = true;
         break;
       }
       if (options.screens === 'all') { try { lastShot = await takeShot(n); } catch { /* keep going */ } }
 
-      // --auto: only a step whose automatic check passed without plan warnings or browser errors goes on by itself,
-      // after a countdown.
-      const countdown = options.auto && auto && auto.ok && !warnings.length && !seen.total()
+      // --auto: only a step whose automatic check passed without plan warnings, browser errors or critical network
+      // findings goes on by itself, after a countdown. Network warnings do not hold it.
+      const countdown = options.auto && auto && auto.ok && !warnings.length && !seen.total() && !(net && net.critical())
         ? { seconds: AUTO_SECONDS, text: t.autoIn, hold: t.autoHold } : undefined;
       const res = await ask(panelFor(n, s, {
         auto,
@@ -996,7 +1037,7 @@ async function walk(o) {
       record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: res.a, note: res.note || undefined,
         auto: auto || undefined, againstCheck: (res.a === 'pass' && auto && !auto.ok) || undefined, error: runError ? firstLine(runError) : undefined, markMissing: markMissing || undefined,
         warnings: warnings.length ? warnings : undefined, answeredBy: res.by, seconds: res.seconds, screenshot: lastShot || undefined,
-        browserErrors: seen.take() });
+        browserErrors: seen.take(), network: await takeNetwork() });
       if (res.a === 'stop') { stopped = true; break; }
     }
     watching = false;
@@ -1013,7 +1054,8 @@ async function walk(o) {
       header: format(t.step, { n: total, total }), accent: COLORS.info, t, didLabel: t.did, expectLabel: t.outcome,
       title: t.doneTitle, did: t.doneDid, shot: false,
       expect: [format(t.doneSummary, counts), ...(counts.auto ? [format(t.doneAuto, counts)] : []),
-        ...(counts.against ? [format(t.doneAgainst, counts)] : []), ...(counts.errorSteps ? [format(t.doneErrors, counts)] : [])],
+        ...(counts.against ? [format(t.doneAgainst, counts)] : []), ...(counts.errorSteps ? [format(t.doneErrors, counts)] : []),
+        ...(counts.networkCritical ? [format(t.doneNetworkCritical, counts)] : counts.networkSteps ? [format(t.doneNetwork, counts)] : [])],
       buttons: [
         { label: t.close, value: 'close', color: COLORS.info },
         ...(options.fresh ? [] : [{ label: t.signOut, value: 'signout', color: COLORS.stop }]),

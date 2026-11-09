@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+- **`--network`: what the network did, under each step.** A 🌐 line in the panel gives the step's requests, bytes on
+  the wire and slowest call, followed by its strong findings, updated while the panel waits.
+  - ⛔ **Critical:** a secret field in a JSON answer (`password`, `passwordHash`, `secret`, `apiKey`, a card number,
+    a token outside a sign-in or token endpoint), a secret in an address (`?access_token=`), or part of a connection
+    string in an error answer.
+  - ⚠ **Warning:** a call taking 3 × `slowMs` or more, the same call three or more times in one step (N+1), a
+    personal data field (`iban`, `tckn`, a national id), or a stack trace or database error in an error answer.
+  - The report adds a "Network" section with every finding, also calls over `slowMs` and answers over 1 MB, and per
+    site the missing security headers (on how many pages), headers that name the server, session cookies without
+    HttpOnly or Secure, and text sent uncompressed.
+  - Headers and bodies are read only for the application's own addresses (the walk's host on any port, plus the
+    plan's `network.origins`), and only in memory. `events.jsonl` gains `network` and `walk.json` gains `network`;
+    both keep counts, times, sizes, paths as for browser errors, and the names of the fields
+    (`$.items[].passwordHash`), parameters, headers and cookies a finding is about, never a value.
+  - A request sent while the value box is drawn is counted and timed only.
+  - On a local address, what a developer machine shows on purpose (the framework's error page, the site's headers) is
+    marked "expected in this environment" and not counted.
+  - A critical finding keeps `--auto` from going on by itself; a warning does not.
+  - A plan can set `network: { slowMs, origins, ignore }`. A bad setting is refused before the browser opens.
+- **Work items with a key.** `run PROJ-123` and `report PROJ-123-2` find the plan of a Jira or Linear key like a
+  number. A key that is also a walk of another plan (plan `proj`, walk `proj-123`) is an error that lists both, never
+  a guess. The report writes `#` only before a number. The workflow reads `PROJ-123`, `AB#6655` and `#6655` in
+  branches and commits.
+- **Plans in the repository.** The README describes keeping a plan next to the code and walking it with
+  `run <file.js>`, with or without Claude.
+- The demo's help page makes three more background calls that change nothing on the screen: a profile that sends a
+  password hash, settings asked for three times, and statistics that take 1.5 s. `demo --network` shows them in
+  step 14. Without the flag the demo walks as before.
+
 ## 1.2.0 — 2026-11-06
 
 - **Browser errors under each step.** The panel shows what the screen does not: uncaught script errors (and unhandled

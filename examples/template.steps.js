@@ -9,6 +9,7 @@ module.exports = {
   ready: null,                 // CSS selector that exists only once signed in and on the start page
   login: null,                 // regex source matching sign-in URLs (default: login|signin|auth|…)
   ignoreErrors: [],            // known browser noise, e.g. 'GET /hub/negotiate → 404' (matched against the panel's line)
+  network: null,               // for --network: { slowMs: 1000, origins: ['https://api.example.com'], ignore: ['/hub/'] }
 
   steps: [
     {

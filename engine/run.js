@@ -21,6 +21,7 @@ const browser = require('./browser');
 const report = require('./report');
 const { pickLanguage, systemLocale, LANGUAGES } = require('./i18n');
 const { compileIgnore } = require('./errors');
+const { compileConfig } = require('./network');
 
 const PLAYWRIGHT_VERSION = '1.63.0';
 // The floor of that playwright-core: below it, loading it ends the process with its own message.
@@ -39,12 +40,12 @@ const FLAGS = {
     browser: 'value', base: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool',
     'skip-writes': 'bool', 'allow-remote-writes': 'bool', 'work-item': 'value', fresh: 'bool', screens: 'value',
     locale: 'value', lang: 'value', 'keep-downloads': 'bool', force: 'bool', auto: 'bool', trace: 'bool', video: 'bool',
-    panel: 'value',
+    panel: 'value', network: 'bool',
   },
   demo: {
     browser: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool', 'skip-writes': 'bool',
     fresh: 'bool', screens: 'value', locale: 'value', lang: 'value', 'keep-downloads': 'bool', auto: 'bool', trace: 'bool',
-    video: 'bool', panel: 'value',
+    video: 'bool', panel: 'value', network: 'bool',
   },
   list: {},
   report: {},
@@ -146,7 +147,7 @@ function loadPlan(file) {
     if (s.check && typeof s.check !== 'function') throw new UsageError(`${file}: step ${i + 1} check must be a function.`);
     if (s.skipTo && !s.approve) throw new UsageError(`${file}: step ${i + 1} uses skipTo without approve.`);
   });
-  try { compileIgnore(plan.ignoreErrors); } catch (e) { throw new UsageError(`${file}: ${e.message}`); }
+  try { compileIgnore(plan.ignoreErrors); compileConfig(plan.network); } catch (e) { throw new UsageError(`${file}: ${e.message}`); }
   return plan;
 }
 
@@ -199,10 +200,10 @@ function writeReport(project, planId, walkId) {
     const prevMeta = store.readJson(path.join(store.walkDir(project, prevId), 'walk.json'));
     if (prevMeta) prev = { meta: prevMeta, events: store.readEvents(project, prevId) };
   }
-  const { markdown, counts, against, errorSteps } = report.build(meta, store.readEvents(project, walkId), prev);
+  const { markdown, counts, against, errorSteps, networkSteps } = report.build(meta, store.readEvents(project, walkId), prev);
   const file = path.join(dir, 'report.md');
   fs.writeFileSync(file, markdown);
-  return { file, markdown, counts, against, errorSteps, meta };
+  return { file, markdown, counts, against, errorSteps, networkSteps, meta };
 }
 
 async function main() {
@@ -298,6 +299,8 @@ async function main() {
     // The demo application and its plan speak the panel's language.
     const lang = pickLanguage(flags.lang);
     process.env.GUIDED_SMOKE_LANG = lang;
+    // Step 14 of the demo plan says what --network shows there.
+    process.env.GUIDED_SMOKE_DEMO_NETWORK = flags.network ? '1' : '';
     const demoProject = flags.project ? project : 'guided-smoke-demo';
     const planPath = path.join(__dirname, '..', 'examples', 'demo', 'steps.js');
     // A pointer in the data folder, so that list and report find the demo plan like any other. In a project of the
@@ -408,6 +411,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
         fresh: !!flags.fresh, screens: flags.screens || null, locale: flags.locale || plan.locale || systemLocale(),
         lang: pickLanguage(flags.lang || plan.lang), keepDownloads: !!flags['keep-downloads'],
         auto: !!flags.auto, trace: !!flags.trace, video: !!flags.video, panel,
+        network: flags.network ? compileConfig(plan.network) : null,
       },
     });
   } catch (e) {
@@ -420,7 +424,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
   }
   const r = writeReport(project, planId, walkId);
   console.log(`report: ${r.file}`);
-  console.log(`result: ${r.meta.result} · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}${r.against.length ? ` · ⚠ passed over a failed check: ${r.against.join(', ')}` : ''}${r.errorSteps.length ? ` · ⚠ browser errors in steps: ${r.errorSteps.join(', ')}` : ''}`);
+  console.log(`result: ${r.meta.result} · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}${r.against.length ? ` · ⚠ passed over a failed check: ${r.against.join(', ')}` : ''}${r.errorSteps.length ? ` · ⚠ browser errors in steps: ${r.errorSteps.join(', ')}` : ''}${r.networkSteps.length ? ` · ⚠ network findings in steps: ${r.networkSteps.join(', ')}` : ''}`);
   return EXIT.ok;
 }
 

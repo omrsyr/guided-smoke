@@ -16,6 +16,12 @@ rebuilds it. It contains:
 - **Browser errors** (only when there are any): per step the first ones as kept: kind, method, path, status, the
   error's type and the script's place; how many more; how many the plan's `ignoreErrors` left out. Messages are not
   in the records; "•••" alone means the value box was open.
+- **Network** (only with `--network`): per step the requests, bytes, slowest call and findings (⛔ critical, ⚠
+  warning), then every finding as a line; findings a local walk expects are marked "expected in this environment"
+  and not counted. Then a "Site" part per address of the application: missing security headers (on how many pages),
+  headers that name the server, session cookie flags, text sent uncompressed. On a local address all of it is
+  expected there, to be checked on the test or production server. The summary names the steps with findings, and the
+  paste block counts them.
 - **Compared with the previous walk** of the same plan: every step whose result changed (`✖ → ✔`).
 - **To paste into the work item:** a plain-text block with the ✔/✖ list (with the browser's error count per step) and
   the measured time.
@@ -28,7 +34,9 @@ Keep it short:
 2. Every ✖ with the user's note, and what you think it means (a bug, a wrong expectation in the plan, test data).
    Also every step with browser errors, even a ✔ one: the user judged the screen, the browser saw more. Say whether
    the step expected them (a refused call) or they point at a bug (a 500, a script error); for recurring noise of
-   the environment, suggest `ignoreErrors`.
+   the environment, suggest `ignoreErrors`. With `--network`, every ⛔ finding (a secret where it should not be:
+   name the field or parameter and the call) and the ⚠ ones worth a change (a slow or repeated call, personal data
+   the screen does not show); for a remote address also the site's missing headers and cookie flags. Never a value.
 3. The next action: fix and `--retry-failed`, or "all passed".
 
 ## Effort

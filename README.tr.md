@@ -28,6 +28,10 @@ listesini okuman, tek başına tıklaman ya da hızla akıp giden bir betiği iz
   bekler.
 - Panel her adımın altında ekranda göremediğini de gösterir: adım sırasında tarayıcının bildirdiği **JS hataları,
   konsol hataları ve başarısız istekler** (HTTP 4xx/5xx, hiç cevap almayan çağrı).
+- `--network` ile **ağı** da senin yerine okur: her adımda istek sayısı, bayt ve en yavaş çağrı; yavaş ya da
+  tekrarlanan çağrı, yanıtta parola özeti ya da token, adreste gizli değer, hata sayfasında bağlantı dizesi ya da
+  stack trace, ekranın belki gerektirmediği kişisel veri gibi bulgular. Rapor, sitenin eksik güvenlik başlıklarını ve
+  oturum çerezi bayraklarını da ekler. Kayda yalnız adlar ve sayılar girer, hiçbir değer girmez.
 - Her cevap anında kaydedilir. **Rapor** geçeni ve farklı olanı, tarayıcının hata bildirdiği adımları, ölçülen koşu
   süresini, önceki koşudan bu yana neyin değiştiğini ve iş kaydına yapıştırılacak bir bloğu verir.
 - Düzeltmeden sonra `run 6655 --retry-failed` yalnız ✖ işaretli adımları koşar.
@@ -76,7 +80,7 @@ node ~/.claude/skills/guided-smoke/engine/run.js demo      # plugin'de: aynı ik
 
 127.0.0.1'de küçük bir demo uygulaması açılır ve tarayıcında 14 adımlık bir koşu başlar: sayfada yazan hesapla giriş
 yap, sonra paneli izle (yaklaşık 5 dakika). Her adım türü var: form, tarayıcının engellediği bir doğrulama, indirme,
-pencere, iki izinli adım, arka plan işi, değer kutusuyla API çağrıları ve bilerek düşen bir arka plan çağrısı (panel gösterir). Makinenden hiçbir şey çıkmaz; demo
+pencere, iki izinli adım, arka plan işi, değer kutusuyla API çağrıları ve bilerek düşen bir arka plan çağrısı (panel gösterir; `demo --network` yardım sayfasının diğer çağrılarının ne gönderdiğini ve neye mal olduğunu da gösterir). Makinenden hiçbir şey çıkmaz; demo
 kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin.
 
 ## Kullanım
@@ -96,7 +100,8 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
 `--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (varsayılan: sistemin dili), `--skip-writes`, `--fresh`,
 `--auto` (kontrolü geçen adım 3 sn sonra kendiliğinden geçer), `--panel left,min` (köşe, küçültülmüş başla),
 `--video`, `--trace` (kayıtlar koşu klasöründe; değer kutusu izin dışında kalır; `--video` için bir kez
-`run.js setup --video`, yaklaşık 4 MB). Ayrıntı: [SKILL.md](SKILL.md).
+`run.js setup --video`, yaklaşık 4 MB), `--network` (ağın yaptıkları, her adımın altında ve raporda). Ayrıntı:
+[SKILL.md](SKILL.md).
 
 ## Giriş ve veriler
 
@@ -107,8 +112,10 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
   `%LOCALAPPDATA%\guided-smoke` (Windows), `~/Library/Application Support/guided-smoke` (macOS),
   `~/.local/share/guided-smoke` (Linux) ya da `GUIDED_SMOKE_HOME`.
 - Kayda giren: adım başlıkları, cevapların ve notların, otomatik kontrol metinleri, süreler; tarayıcı hatalarından
-  yalnız tür, yöntem, yol (sorgusuz, kimlikler maskeli) ve durum kodu. Girmeyen: sayfanın HTML'i, çerezler, form
-  değerleri, kimlik bilgileri, istek/yanıt gövdeleri, hata mesajları. Ekran görüntüsü yalnız sen istersen.
+  yalnız tür, yöntem, yol (sorgusuz, kimlikler maskeli) ve durum kodu; `--network` ile ayrıca istek sayıları,
+  boyutlar, süreler ve bir bulgunun ilgili olduğu alan, parametre, başlık ve çerez adları. Girmeyen: sayfanın HTML'i,
+  çerezler, form değerleri, kimlik bilgileri, istek/yanıt gövdeleri, hata mesajları, bulunan hiçbir şeyin değeri.
+  Ekran görüntüsü yalnız sen istersen.
 
 ![Sol alttaki değer kutusu (İngilizce panel): API hesabını kullanıcı yazdı; kutuda görünen sonuçta e-posta da parola da yok](docs/screenshot-box.png)
 
@@ -116,6 +123,24 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
 
 Plan küçük bir JavaScript modülü; Claude yazar, sen düzenleyebilirsin. Bkz.
 [references/writing-steps.md](references/writing-steps.md) ve [examples/demo/steps.js](examples/demo/steps.js).
+
+## Plan repoda, Claude'suz koşu
+
+Planın veri klasöründe durması gerekmez. Kodun yanında tut, örneğin `smoke/6655-machine-expiry.steps.js`, ve kod
+gibi incele. Sonra Node.js ve Chrome ya da Edge'i olan herkes onu koşabilir, Claude'lu ya da Claude'suz: bir testçi,
+bir çalışma arkadaşın, sürümden önce sen.
+
+```bash
+git clone https://github.com/omrsyr/guided-smoke ~/guided-smoke            # bir kez; ya da kurulu skill'in klasörü
+node ~/guided-smoke/engine/run.js setup                                    # bir kez: playwright-core veri klasörüne
+node ~/guided-smoke/engine/run.js run smoke/6655-machine-expiry.steps.js --base https://localhost:5001
+```
+
+Panel, sorular ve rapor Claude Code'dakiyle aynıdır. Dosya projenin planlarına kopyalanmaz, bağlanır: düzenlenecek
+tek kopya o kalır, bir sonraki seferde `run 6655` onu bulur. Proje dosyalarına yaptığı `require`'lar çalışmaya devam
+eder. Planın kimliği `id` alanıdır, yoksa `.steps.js` olmadan dosya adı. Koşular ve raporlar, koşan makinenin veri
+klasöründe kalır. Plan senin yetkilerinle çalışan koddur: yalnız okuduğun planları koş
+(bkz. [güvenlik](references/safety.md)).
 
 ## Geliştirme
 

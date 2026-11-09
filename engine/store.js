@@ -76,13 +76,19 @@ class ResolveError extends Error {
   }
 }
 
+// A work item: a number (Azure DevOps, GitHub, GitLab) or a key such as PROJ-123 (Jira, Linear), in lower case.
+const ITEM = '(?:\\d+|[a-z][a-z0-9_]*-\\d+)';
+const ITEM_ONLY = new RegExp(`^${ITEM}$`);
+const ITEM_WALK = new RegExp(`^(${ITEM})-(\\d+)$`);
+
 /**
  * Turns a reference into { planId, walkId|null }. Accepted forms:
  *   <plan-id>            e.g. 6655-machine-expiry
  *   <plan-id>-<n>        a walk of that plan
- *   <work-item>          e.g. 6655 — the only plan whose id is 6655 or starts with "6655-"
+ *   <work-item>          e.g. 6655 or PROJ-123 — the only plan whose id is the work item or starts with it and "-"
  *   <work-item>-<n>      walk n of that plan
- * Nothing is guessed: no match or several matches is an error listing what exists.
+ * Nothing is guessed: no match or several matches is an error listing what exists. "proj-123" can be both a work item
+ * and walk 123 of a plan named "proj": when both exist, that is an error too.
  */
 function resolve(project, ref, root) {
   const plans = listPlans(project, root);
@@ -91,15 +97,23 @@ function resolve(project, ref, root) {
 
   if (plans.includes(value)) return { planId: value, walkId: null };
 
+  const byItem = item => plans.filter(p => p === item || p.startsWith(item + '-'));
+  const itemPlans = ITEM_ONLY.test(value) ? byItem(value) : [];
+
   const walkMatch = /^(.+)-(\d+)$/.exec(value);
   if (walkMatch && plans.includes(walkMatch[1])) {
-    return { planId: walkMatch[1], walkId: existingWalk(project, walkMatch[1], Number(walkMatch[2]), root) };
+    const walkExists = fs.existsSync(walkDir(project, value, root));
+    if (walkExists && itemPlans.length) {
+      throw new ResolveError(`"${ref}" is both walk ${walkMatch[2]} of plan ${walkMatch[1]} and work item ${ref}; use the full id.`, [value, ...itemPlans]);
+    }
+    if (walkExists || !itemPlans.length) {
+      return { planId: walkMatch[1], walkId: existingWalk(project, walkMatch[1], Number(walkMatch[2]), root) };
+    }
   }
 
-  const byItem = item => plans.filter(p => p === item || p.startsWith(item + '-'));
-  if (/^\d+$/.test(value)) return { planId: single(byItem(value), value, plans), walkId: null };
+  if (ITEM_ONLY.test(value)) return { planId: single(itemPlans, value, plans), walkId: null };
 
-  const itemWalk = /^(\d+)-(\d+)$/.exec(value);
+  const itemWalk = ITEM_WALK.exec(value);
   if (itemWalk) {
     const planId = single(byItem(itemWalk[1]), itemWalk[1], plans);
     return { planId, walkId: existingWalk(project, planId, Number(itemWalk[2]), root) };

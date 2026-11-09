@@ -10,6 +10,7 @@ const store = require('../store');
 const browser = require('../browser');
 const report = require('../report');
 const { texts } = require('../i18n');
+const network = require('../network');
 const { autoWalk } = require('./harness');
 
 const DEMO = path.join(__dirname, '..', '..', 'examples', 'demo');
@@ -34,23 +35,35 @@ const signIn = {
 };
 const readEvents = dir => fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
 
-function loadPlan(lang) {
+function loadPlan(lang, withNetwork = false) {
   process.env.GUIDED_SMOKE_LANG = lang;
+  process.env.GUIDED_SMOKE_DEMO_NETWORK = withNetwork ? '1' : '';
   const file = require.resolve(path.join(DEMO, 'steps.js'));
   delete require.cache[file];
   return require(file);
 }
 
 // In Turkish the harness moves on before typing into the box, as in a real walk: the API step must wait for the box.
-for (const [lang, boxLate] of [['en', false], ['tr', true]]) {
-  test(`the demo plan passes end to end (${lang}${boxLate ? ', box filled only when a step waits for it' : ''})`, { skip, timeout: 120000 }, async () => {
-    const plan = loadPlan(lang);
+// In English the walk runs with --network; in Turkish without, as before.
+for (const [lang, boxLate, withNetwork] of [['en', false, true], ['tr', true, false]]) {
+  test(`the demo plan passes end to end (${lang}${boxLate ? ', box filled only when a step waits for it' : ''}${withNetwork ? ', --network' : ''})`, { skip, timeout: 120000 }, async () => {
+    const plan = loadPlan(lang, withNetwork);
     const app = await server.start({ lang });
     const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+    const help = plan.steps[13].title;
+    let helpPanel = null;
     try {
       const { meta } = await autoWalk({
         playwright, plan, browser: chosen, base: app.url, lang, walkDir, signIn, boxLate,
         box: { email: server.API_ACCOUNT.email, password: server.API_ACCOUNT.password },
+        options: withNetwork ? { network: network.compileConfig() } : {},
+        // The help page's slow call ends in that step only if the step waits for it, as a reading user does.
+        onPanel: withNetwork ? async (page, { title }) => {
+          if (title !== help || helpPanel) return;
+          const block = '#__guided_smoke [data-guided-smoke-network]';
+          await page.waitForFunction(b => /help\/stats/.test((document.querySelector(b) || {}).textContent || ''), block, { timeout: 8000 });
+          helpPanel = await page.locator(block).textContent();
+        } : undefined,
       });
       assert.strictEqual(meta.result, 'completed');
       const steps = readEvents(walkDir).filter(e => e.kind === 'step' || (e.kind === 'approve' && e.answer !== 'approved'));
@@ -72,12 +85,113 @@ for (const [lang, boxLate] of [['en', false], ['tr', true]]) {
       const recorded = fs.readdirSync(walkDir).filter(f => fs.statSync(path.join(walkDir, f)).isFile())
         .map(f => fs.readFileSync(path.join(walkDir, f), 'utf8')).join('\n');
       assert.ok(!recorded.includes(server.API_ACCOUNT.password) && !recorded.includes(server.API_ACCOUNT.email), 'box values stay out of the records');
+      assert.ok(!recorded.includes(server.PROFILE_HASH), 'the leaked hash itself stays out of the records');
+
+      if (!withNetwork) {
+        assert.ok(!meta.network && steps.every(e => !e.network), 'without --network nothing about the network is recorded');
+        return;
+      }
+      // Only the help page has findings: the profile call's password hash and the settings asked for three times.
+      // Its slow statistics call is under the panel's threshold: the slowest call, a finding in the report only.
+      assert.deepStrictEqual(steps.filter(e => network.findingTotal(e.network)).map(e => e.n), [14]);
+      const r = steps[13].network;
+      assert.deepStrictEqual([r.critical, r.warnings], [1, 2], JSON.stringify(r));
+      const find = (kind, url) => r.findings.find(x => x.kind === kind && x.url === url);
+      assert.deepStrictEqual(find('secret-field', '/api/profile').keys, ['$.passwordHash']);
+      assert.strictEqual(find('repeated', '/api/settings').times, 3);
+      assert.ok(find('slow', '/api/help/stats').ms >= server.STATS_MS - 100, JSON.stringify(r));
+      assert.strictEqual(r.slowest.url, '/api/help/stats');
+      const t = texts(lang);
+      assert.ok(helpPanel.includes(network.findingLine(find('secret-field', '/api/profile'), t)), helpPanel);
+      assert.ok(helpPanel.includes(network.findingLine(find('repeated', '/api/settings'), t)), helpPanel);
+      assert.ok(!helpPanel.includes('/api/help/stats took'), 'a call under 3 × slowMs is not a panel line');
+      // The box's API calls (steps 11 and 12) are counted and timed, never looked into.
+      for (const n of [11, 12]) assert.ok(steps[n - 1].network.findings.every(x => x.url === '•••'), JSON.stringify(steps[n - 1].network));
+      const site = meta.network.sites[new URL(app.url).origin];
+      assert.ok(meta.network.local);
+      assert.deepStrictEqual(Object.keys(site.missing).sort(), ['X-Content-Type-Options', 'X-Frame-Options'], JSON.stringify(site));
+      assert.deepStrictEqual([site.noHttpOnly, site.revealing], [[], []]);
+      const { markdown } = report.build(meta, readEvents(walkDir), null);
+      assert.match(markdown, /🌐 Network findings in steps: 14\./);
+      assert.match(markdown, /### Site — http:\/\/127\.0\.0\.1:\d+ \(expected on this machine/);
     } finally {
       await app.close();
       fs.rmSync(walkDir, { recursive: true, force: true });
     }
   });
 }
+
+test('--network: a critical finding holds --auto and a warning does not; the value box, the plan\'s ignore and a local error page are respected; no value reaches a record or the panel', { skip, timeout: 90000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const shown = {};
+  const secret = { token: 'tok-secret-77', refresh: 'rt-secret-77', iban: 'TR330006100519786457841326', conn: 'conn-secret-77', box: 'box-secret-77', at: 'at-secret-77' };
+  // Answers the application might give, faked in the browser: the demo server stays as it is.
+  const fake = route => {
+    const p = new URL(route.request().url()).pathname;
+    const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    if (p === '/api/fake/user') return json(200, { name: 'A', hasPassword: true, password: null, iban: secret.iban, sessions: [{ refreshToken: secret.refresh }] });
+    if (p === '/api/fake/connect/token') return json(200, { access_token: secret.at, token_type: 'Bearer' });
+    if (p === '/api/fake/stack') return json(500, { title: 'boom', exception: 'System.InvalidOperationException: boom\r\n   at Shop.Orders.Save() in C:\\src\\Orders.cs:line 42' });
+    if (p === '/api/fake/conn') return route.fulfill({ status: 500, contentType: 'text/html', body: `<p>Login failed. Server=db01;Database=Shop;User Id=sa;Password=${secret.conn};</p>` });
+    return json(200, {});
+  };
+  const get = urls => async ({ page }) => { await page.evaluate(list => Promise.all(list.map(u => fetch(u).then(r => r.text()))), urls); };
+  const ok = async () => [true, 'ok'];
+  const plan = {
+    id: 'network', start: '/orders/1001', ready: '#order-card', login: '/login',
+    // The fake error answers are browser errors too; left out here so that only the network decides about --auto.
+    ignoreErrors: ['GET /api/fake/'],
+    network: { ignore: ['/api/fake/noise'] },
+    steps: [
+      { title: 'Leaks', did: 'x', expect: ['x'], check: ok, run: async ctx => {
+        await ctx.page.route('**/api/fake/**', fake);
+        await get([`/api/fake/user?access_token=${secret.token}`, '/api/fake/connect/token'])(ctx);
+      } },
+      { title: 'Repeated', did: 'x', expect: ['x'], check: ok, run: get(['/api/settings', '/api/settings', '/api/settings']) },
+      { title: 'Local error page', did: 'x', expect: ['x'], check: ok, run: get(['/api/fake/stack']) },
+      { title: 'Connection string', did: 'x', expect: ['x'], check: ok, run: get(['/api/fake/conn']) },
+      { title: 'Boxed', did: 'x', expect: ['x'], check: ok, run: async ({ secretBox, inPage }) => {
+        await secretBox({ fields: [{ name: 'token', label: 'Token', secret: true }] });
+        await inPage(async ({ fields }) => (await fetch(`/api/fake/user?access_token=${fields.token}`)).status);
+        await secretBox(null);
+      } },
+      { title: 'Ignored', did: 'x', expect: ['x'], check: ok, run: get(['/api/fake/noise', '/api/fake/noise', '/api/fake/noise']) },
+    ],
+  };
+  try {
+    const { meta } = await autoWalk({
+      playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn, letAuto: true, box: { token: secret.box },
+      options: { auto: true, network: network.compileConfig(plan.network) },
+      onPanel: async (page, { title }) => { shown[title] = await page.locator('#__guided_smoke').textContent(); },
+    });
+    assert.strictEqual(meta.result, 'completed');
+    const events = readEvents(walkDir);
+    assert.deepStrictEqual(events.map(e => [e.title, e.answeredBy || 'user']),
+      [['Leaks', 'user'], ['Repeated', 'auto'], ['Local error page', 'auto'], ['Connection string', 'user'], ['Boxed', 'auto'], ['Ignored', 'auto']]);
+    const [leaks, repeated, local, conn, boxed, ignored] = events.map(e => e.network);
+    const find = (r, kind) => r.findings.find(x => x.kind === kind);
+    assert.deepStrictEqual(find(leaks, 'secret-param').params, ['access_token']);
+    assert.deepStrictEqual(find(leaks, 'secret-field').keys, ['$.sessions[].refreshToken']);
+    assert.deepStrictEqual(find(leaks, 'personal-field').keys, ['$.iban']);
+    assert.ok(!leaks.findings.some(x => /connect\/token/.test(x.url)), 'a token endpoint hands tokens out');
+    assert.match(shown.Leaks, /⛔ GET \/api\/fake\/user: secret in the address: access_token/);
+    assert.deepStrictEqual([repeated.critical, repeated.warnings, find(repeated, 'repeated').times], [0, 1, 3]);
+    assert.deepStrictEqual([local.critical, local.warnings, find(local, 'error-detail').env], [0, 0, true]);
+    assert.doesNotMatch(shown['Local error page'], /stack trace/, 'what a local error page shows on purpose is not a panel line');
+    assert.strictEqual(conn.critical, 1);
+    assert.ok(boxed.findings.every(x => x.url === '•••') && !find(boxed, 'secret-param') && !find(boxed, 'secret-field'), JSON.stringify(boxed));
+    assert.deepStrictEqual([ignored.ignored, ignored.findings], [3, []]);
+    const recorded = fs.readdirSync(walkDir).filter(f => fs.statSync(path.join(walkDir, f)).isFile())
+      .map(f => fs.readFileSync(path.join(walkDir, f), 'utf8')).join('\n');
+    const panels = Object.values(shown).join('\n');
+    for (const leak of [...Object.values(secret), 'db01', 'Orders.cs']) assert.ok(!recorded.includes(leak) && !panels.includes(leak), leak);
+    assert.match(report.build(meta, events, null).markdown, /`⚠ GET \/api\/fake\/stack → 500: stack trace in the error response \(expected in this environment\)`/);
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
 
 test('passing over a failed automatic check takes a second click and is flagged', { skip, timeout: 60000 }, async () => {
   const app = await server.start({ lang: 'en' });

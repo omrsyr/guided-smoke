@@ -1,8 +1,9 @@
 'use strict';
 // The demo application for `node run.js demo`: a tiny orders site with a sign-in, one order with a due date, an invoice
 // download, the application's own confirm dialog, a client API with an account of its own, a reminder job and a help
-// page whose background call fails on purpose. It
-// listens on 127.0.0.1 only, keeps everything in memory and forgets it when it stops. It exists for the demo plan.
+// page whose background calls show what the screen does not: one fails on purpose, one hands out a password hash, one
+// is made three times and one is slow (--network). It listens on 127.0.0.1 only, keeps everything in memory and
+// forgets it when it stops. It exists for the demo plan.
 
 const http = require('http');
 const crypto = require('crypto');
@@ -13,6 +14,10 @@ const SIGN_IN = { user: 'demo', password: 'demo' };
 const API_ACCOUNT = { email: 'api@example.com', password: 'demo-api' };
 const JOB = 'overdue-reminder';
 const JOB_SECONDS = 3;
+// The help page's statistics take this long: a slow call for --network.
+const STATS_MS = 1500;
+// What the profile call gives away. Not a real hash; the tests check that it never reaches a record.
+const PROFILE_HASH = '$2b$10$demoHashNotRealDemoHashNotReal';
 
 const pad = n => String(n).padStart(2, '0');
 /** Today plus `offset` days as yyyy-mm-dd, in this machine's time zone (what a date input shows). */
@@ -81,6 +86,12 @@ if (dialog) {
 const tips = document.querySelector('[data-tips]');
 if (tips) {
   fetch(tips.dataset.tips).then(r => { if (!r.ok) throw new Error('Tips could not be loaded (HTTP ' + r.status + ')'); });
+  // More background calls that all succeed and change nothing on the screen; --network shows what they cost and send:
+  // the signed-in user's profile (with a field it should not have), the same settings asked for by three parts of the
+  // page, and statistics that take a moment.
+  fetch('/api/profile');
+  for (let i = 0; i < 3; i++) fetch('/api/settings');
+  fetch('/api/help/stats');
 }
 `;
 
@@ -260,6 +271,12 @@ ${failed ? `<div class="alert alert-error" role="alert">${esc(T.wrongSignIn)}</d
       return html(page(T, lang, T.helpTitle, `<section class="card" data-tips="/api/tips"><h1>${esc(T.helpTitle)}</h1><p id="help-due">${esc(T.helpDue)}</p></section>`));
     }
     if (route === 'GET /api/tips') return json(500, { message: 'The demo fails this call on purpose.' });
+    if (route === 'GET /api/profile') return json(200, { name: 'Demo User', role: 'demo', passwordHash: PROFILE_HASH });
+    if (route === 'GET /api/settings') return json(200, { dateFormat: 'yyyy-MM-dd', reminders: true });
+    if (route === 'GET /api/help/stats') {
+      // The page may be gone by then (the walk moved on or ended): nothing to answer.
+      return new Promise(done => setTimeout(() => { if (!req.socket.destroyed) json(200, { views: 42 }); done(); }, STATS_MS));
+    }
     return send(404, 'text/plain', 'Not found');
   }
 }
@@ -277,4 +294,4 @@ function start({ lang = 'en', port = 0 } = {}) {
   });
 }
 
-module.exports = { start, db, isoDay, ORDER, JOB, SIGN_IN, API_ACCOUNT };
+module.exports = { start, db, isoDay, ORDER, JOB, SIGN_IN, API_ACCOUNT, PROFILE_HASH, STATS_MS };

@@ -23,9 +23,10 @@ A smoke the user can follow. The script drives a visible browser one step at a t
 **what I did** and **what you should see** (the place is outlined in orange), shows an automatic check, and waits for
 the user: **✔ Correct, continue**, **✖ Different** (with a note) or **■ Stop**. Steps that change something outside the
 page (a database row, a file, an e-mail) ask first. Under each step the panel also shows what the screen does not: the
-script errors, console errors and failed requests the browser reported. Every answer is written down at once; the
-report says what passed, what differed, where the browser reported errors, how long the walk took and what changed
-since the previous walk.
+script errors, console errors and failed requests the browser reported, and with `--network` what the network did:
+slow, repeated or large calls, and secrets or personal data the application sends where it should not. Every answer is
+written down at once; the report says what passed, what differed, where the browser reported errors, how long the walk
+took and what changed since the previous walk.
 
 ## Activation boundary
 
@@ -45,9 +46,10 @@ guided-smoke report <ref>             report of a walk (default: the latest walk
 guided-smoke demo                     try it on the built-in demo application (no project needed)
 ```
 
-`<ref>` is a plan id (`6655-machine-expiry`), a walk id (`6655-machine-expiry-2`), a work item (`6655` — its only
-plan) or a work item with a walk number (`6655-2`). Several plans for one work item, or no match, is an error that
-lists what exists — never guess another plan.
+`<ref>` is a plan id (`6655-machine-expiry`), a walk id (`6655-machine-expiry-2`), a work item (`6655`, or a key
+such as `PROJ-123` — its only plan) or a work item with a walk number (`6655-2`, `PROJ-123-2`). Several plans for one
+work item, a key that is also a walk of another plan, or no match, is an error that lists what exists — never guess
+another plan.
 
 Flags (order free; unknown flags and bad values are refused with a clear message):
 
@@ -65,6 +67,7 @@ Flags (order free; unknown flags and bad values are refused with a clear message
 | `--fresh` | Throw-away browser profile for this walk (sign in again, nothing kept) |
 | `--auto` | A step whose automatic check passed without plan warnings goes on by itself after a 3 s countdown (⏸ Wait or any button stops it). Failed or missing checks, permitted steps and value-box waits always wait. The report marks such steps "by itself" |
 | `--panel left|right[,min]` | Panel corner (the value box takes the other one); `min` starts it minimized. The user's minimize choice carries over |
+| `--network` | Under each step also what the network did: requests, bytes, the slowest call, and findings (slow, repeated or large calls; a secret field, a secret in an address, a connection string or stack trace in an error answer; personal data fields). A critical finding keeps `--auto` from going on. The report gets a "Network" section with the site's security headers and cookie flags. Only names and numbers are recorded, never a value (see [writing steps](references/writing-steps.md) rule 17) |
 | `--video` | Record the walk as `video/walk.webm` in the walk folder. Needs Playwright's ffmpeg once (`setup --video`, about 4 MB; ask first) |
 | `--trace` | Record a Playwright trace after the sign-in, in parts (`trace-1.zip`, …) that leave out the value box. Open with `npx playwright show-trace` |
 | `--reset-login` | Delete this project's saved sign-in (`node engine/run.js reset-login`) |

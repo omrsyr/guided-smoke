@@ -71,6 +71,10 @@ screenshot paths. It never keeps page HTML, cookies, values typed into forms or 
 Browser errors are kept as counts and their first few entries: kind, method, path without query or fragment (an
 e-mail, a number of 6+ digits, a token or GUID in the path becomes `•••`; the host only for another origin), status,
 the error's type and the script's place; never a message text or a request or response body. While the value box is
-drawn, a request sent and any message logged keep no address, place or text at all; the panel shows them masked too. Screenshots are taken only on request
+drawn, a request sent and any message logged keep no address, place or text at all; the panel shows them masked too.
+With `--network`, the headers and bodies of the application's own answers are read in memory and dropped; kept are
+request counts, bytes, times, statuses, paths as above and the names of the fields (`$.items[].passwordHash`), query
+parameters, headers and cookies a finding is about, never their values. A request sent while the value box is drawn
+is counted and timed only. Screenshots are taken only on request
 (📷, `--screens diff|all`) and stay in the walk folder on this machine; they may show personal data, so treat them
 like the screen itself.

@@ -28,6 +28,10 @@ checklist, clicking through it alone, or watching a script race past.
   move on before typing, the step waits for the box.
 - Under each step the panel also shows what you cannot see on the screen: **script errors, console errors and failed
   requests** (HTTP 4xx/5xx, a call that never got an answer) the browser reported during the step.
+- With `--network` it also reads the **network** for you: per step the requests, the bytes and the slowest call, and
+  findings such as a slow or repeated call, a password hash or token in an answer, a secret in an address, a
+  connection string or stack trace in an error page, or personal data the screen may not need. The report adds the
+  site's missing security headers and session cookie flags. Only names and numbers are kept, never a value.
 - Every answer is saved at once. The **report** lists what passed and what differed, the steps with browser errors,
   the measured walk time, what changed since the previous walk, and a block to paste into your work item.
 - After a fix, `run 6655 --retry-failed` runs only the steps marked ✖.
@@ -76,7 +80,7 @@ node ~/.claude/skills/guided-smoke/engine/run.js demo      # from the plugin: th
 
 A small demo application starts on 127.0.0.1 and a 14-step walk opens in your browser: sign in with the account shown
 on the page, then follow the panel (about 5 minutes). It covers every kind of step: a form, a validation the browser
-blocks, a download, a dialog, two permitted steps, a background job, API calls through the value box and a background call that fails on purpose (the panel shows it). Nothing
+blocks, a download, a dialog, two permitted steps, a background job, API calls through the value box and a background call that fails on purpose (the panel shows it; `demo --network` also shows what the help page's other calls send and cost). Nothing
 leaves your machine, and the demo forgets everything when it stops. In Claude Code you can also say
 `/guided-smoke demo`.
 
@@ -97,7 +101,8 @@ Useful flags: `--browser chrome|edge`, `--base https://localhost:5001`, `--pace 
 `--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (default: your system's), `--skip-writes`, `--fresh`,
 `--auto` (a step whose check passed goes on by itself after 3 s), `--panel left,min` (corner, start minimized),
 `--video`, `--trace` (recordings in the walk folder; the value box is left out of the trace; `--video` needs
-`run.js setup --video` once, about 4 MB). See [SKILL.md](SKILL.md).
+`run.js setup --video` once, about 4 MB), `--network` (what the network did, under each step and in the report).
+See [SKILL.md](SKILL.md).
 
 ## Sign-in and data
 
@@ -108,8 +113,9 @@ Useful flags: `--browser chrome|edge`, `--base https://localhost:5001`, `--pace 
   `%LOCALAPPDATA%\guided-smoke` (Windows), `~/Library/Application Support/guided-smoke` (macOS),
   `~/.local/share/guided-smoke` (Linux), or `GUIDED_SMOKE_HOME`.
 - Recorded: step titles, your answers and notes, automatic-check texts, times, and of browser errors only the kind,
-  method, path (no query, ids masked) and status. Never: page HTML, cookies, form values, credentials, request or
-  response bodies, error messages. Screenshots only when you ask.
+  method, path (no query, ids masked) and status; with `--network` also request counts, sizes, times and the names
+  of the fields, parameters, headers and cookies a finding is about. Never: page HTML, cookies, form values,
+  credentials, request or response bodies, error messages, the value of anything found. Screenshots only when you ask.
 
 ![The value box at the bottom left: the user typed the API account; the result shown in the box carries no e-mail or password](docs/screenshot-box.png)
 
@@ -131,6 +137,24 @@ A plan is a small JavaScript module; Claude writes it, you can edit it. See
   check: async ({ page, text }) => [(await text(page.locator('#order-card'))).includes('2030-01-31'), 'Date shown.', 'Date not shown.'],
 }
 ```
+
+## Plans in the repository, walked without Claude
+
+A plan does not have to live in the data folder. Keep it next to the code, for example
+`smoke/6655-machine-expiry.steps.js`, and review it like code. Anyone with Node.js and Chrome or Edge can then walk
+it, with or without Claude: a tester, a colleague, you before a release.
+
+```bash
+git clone https://github.com/omrsyr/guided-smoke ~/guided-smoke            # once, or use the installed skill's folder
+node ~/guided-smoke/engine/run.js setup                                    # once: playwright-core into the data folder
+node ~/guided-smoke/engine/run.js run smoke/6655-machine-expiry.steps.js --base https://localhost:5001
+```
+
+The panel, the questions and the report are the same as in Claude Code. The file is linked into the project's plans,
+not copied, so it stays the one copy to edit, and `run 6655` finds it the next time. Its own `require`s of project
+files keep working. The plan's id is its `id`, else the file name without `.steps.js`. Walks and reports stay in the
+data folder of the machine that walked them. A plan is code that runs with your rights: walk only plans you have read
+(see [safety](references/safety.md)).
 
 ## Development
 

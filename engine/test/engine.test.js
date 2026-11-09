@@ -12,6 +12,7 @@ process.env.GUIDED_SMOKE_HOME = home;
 const store = require('../store');
 const report = require('../report');
 const errors = require('../errors');
+const network = require('../network');
 const { texts } = require('../i18n');
 const { isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
 const RUN = path.join(__dirname, '..', 'run.js');
@@ -277,6 +278,199 @@ test('the report shows browser errors in the summary, the note column, a section
   assert.match(markdown, /\n✔ a \(⚠ 8 browser errors\)\n✔ b\n✖ c — wrong\n/);
   const old = report.build(meta, events.map(({ browserErrors, ...e }) => e), null).markdown;
   assert.doesNotMatch(old, /Browser errors|In the browser|browser error/, 'a walk recorded before 1.2 reads as before');
+});
+
+// A request as Playwright hands it to the engine, for the network tests: an answer with headers and a body, or a failure.
+function fakeRequest({ method = 'GET', url, type = 'fetch', status = 200, ms = 40, headers = {}, cookies = [], body = '', bytes, failure }) {
+  const h = { 'content-type': 'application/json; charset=utf-8', ...headers };
+  const raw = Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
+  const response = failure ? null : {
+    status: () => status,
+    headers: () => h,
+    headersArray: async () => [...Object.entries(h).map(([name, value]) => ({ name, value })), ...cookies.map(value => ({ name: 'Set-Cookie', value }))],
+    body: async () => raw,
+  };
+  return {
+    method: () => method, url: () => url, resourceType: () => type,
+    timing: () => ({ startTime: Date.now() - ms, responseEnd: failure ? -1 : ms }),
+    existingResponse: () => response,
+    sizes: async () => ({ responseBodySize: bytes ?? raw.length }),
+    failure: () => (failure ? { errorText: failure } : null),
+  };
+}
+
+test('network findings keep names, never values: fields, query parameters and error bodies', () => {
+  const f = network.sensitiveFields({
+    items: [{ name: 'A', passwordHash: 'h-1', hasPassword: true, password: null, pin: '1', iban: 'TR33 0006 1005 1978 6457 8413 26', tckn: 12345678901 }],
+    'ali@example.com': { password: 'x1' }, masked: { password: '********', secret: '' }, card: { cardNumber: 4111111111111111 },
+    nextPageToken: 'cursor', csrfToken: 'for-the-page', accessToken: 'a', recoveryCodes: ['c1', 'c2'], user_secret: 's',
+  });
+  assert.deepStrictEqual(f.secret, ['$.items[].passwordHash', '$.•••.password', '$.card.cardNumber', '$.accessToken', '$.recoveryCodes', '$.user_secret']);
+  assert.deepStrictEqual(f.personal, ['$.items[].iban', '$.items[].tckn']);
+  assert.deepStrictEqual(network.sensitiveFields({ access_token: 'a', refresh_token: 'r', password: 'p' }, true).secret, ['$.password'], 'a token endpoint hands tokens out');
+
+  assert.deepStrictEqual(network.secretParams('https://x.test/a?access_token=1&page=2&apiKey=k&key=AIza&sig=s&code=c&sid=9&token='), ['access_token', 'apiKey']);
+
+  const d = network.errorDetails;
+  assert.deepStrictEqual(d('<h1>An unhandled exception occurred while processing the request.</h1>'), { conn: false, stack: true, sql: false });
+  assert.ok(d('{"exception":"System.Exception: boom\\r\\n   at Shop.Orders.Save()"}').stack, 'a .NET stack inside JSON');
+  assert.ok(d('System.Exception: boom\n   at Shop.Orders.Save(Order o) in C:\\src\\Orders.cs:line 42').stack);
+  assert.ok(d('Error: x\n    at handler (/srv/app/routes.js:12:5)').stack, 'Node.js');
+  assert.ok(d('at com.shop.Orders.save(Orders.java:42)').stack, 'JVM');
+  assert.ok(d('Traceback (most recent call last):\n  File "a.py"').stack, 'Python');
+  assert.ok(d("Microsoft.Data.SqlClient.SqlException: Incorrect syntax near 'FROM'.").sql);
+  assert.ok(d('ORA-00942: table or view does not exist').sql);
+  assert.ok(d('Login failed. Server=db01;Database=Shop;User Id=sa;Password=p;').conn);
+  assert.ok(d('cannot reach mongodb://app:pa55@db.internal/shop').conn);
+  for (const quiet of ['Validation failed at line 3.', 'Please try again at 10:00.', 'password=1&user=2', 'The Password= field is required;']) {
+    assert.deepStrictEqual(d(quiet), { conn: false, stack: false, sql: false }, quiet);
+  }
+
+  assert.deepStrictEqual(network.missingHeaders({ 'content-security-policy': "frame-ancestors 'none'" }, true), ['X-Content-Type-Options', 'Strict-Transport-Security']);
+  assert.deepStrictEqual(network.revealingHeaders({ server: 'Kestrel', 'x-powered-by': 'ASP.NET' }), ['X-Powered-By'], 'a server without a version is not counted');
+  assert.deepStrictEqual(network.cookieFlags(['.AspNetCore.Cookies=v; path=/', 'XSRF-TOKEN=v; secure', 'theme=dark', 'sid=; expires=Thu, 01 Jan 1970 00:00:00 GMT'], true),
+    { noHttpOnly: ['.AspNetCore.Cookies'], noSecure: ['.AspNetCore.Cookies'] });
+
+  const en = texts('en');
+  const tr = texts('tr');
+  assert.deepStrictEqual([network.size(512, en), network.size(245760, en), network.size(1258291, en), network.size(1258291, tr)], ['512 B', '240 KB', '1.2 MB', '1,2 MB']);
+  assert.deepStrictEqual([network.time(340, en), network.time(3400, en), network.time(3400, tr)], ['340 ms', '3.4 s', '3,4 sn']);
+});
+
+test('a step\'s network record: counts, bytes, the slowest call and findings; nothing looked into while the box is open, the plan\'s ignore, only the application\'s own bodies', async () => {
+  const base = 'https://localhost:5001';
+  const net = new network.Network({ base, config: network.compileConfig({ slowMs: 500, ignore: ['GET /hub/'] }), local: true });
+  // The application's API on another port of the same host is the application's own.
+  net.finished(fakeRequest({ url: 'https://localhost:7001/api/users?page=2', body: { items: [{ name: 'A', passwordHash: 'pw-hash-secret', iban: 'TR330006100519786457841326' }] } }), false);
+  net.finished(fakeRequest({ url: `${base}/api/report?access_token=tok-secret-1`, ms: 1800, body: { ok: true } }), false);
+  for (let i = 1; i <= 3; i++) net.finished(fakeRequest({ url: `${base}/api/customers/${i}` }), false);
+  net.finished(fakeRequest({ url: `${base}/api/export`, bytes: 2.5 * 1024 * 1024, body: {} }), false);
+  net.finished(fakeRequest({ url: `${base}/api/auth/token`, body: { access_token: 'at-secret', refresh_token: 'rt-secret' } }), false);
+  net.finished(fakeRequest({ url: 'https://cdn.example.test/lib.json', body: { password: 'third-party-secret' } }), false);
+  net.finished(fakeRequest({ method: 'POST', url: `${base}/api/login?password=box-query-secret`, ms: 900, body: { token: 'box-token-secret' } }), true);
+  net.finished(fakeRequest({ url: `${base}/hub/negotiate?id=1` }), false);
+  net.finished(fakeRequest({ url: `${base}/api/fail`, status: 500, headers: { 'content-type': 'text/html' }, body: '<pre>System.InvalidOperationException: boom\n   at Shop.Orders.Save(Order o) in C:\\src\\Orders.cs:line 42</pre>' }), false);
+  net.finished(fakeRequest({ url: `${base}/api/db`, status: 500, headers: { 'content-type': 'application/problem+json' }, body: { detail: 'Login failed. Server=db01;Database=Shop;User Id=sa;Password=conn-secret;' } }), false);
+  net.failed(fakeRequest({ url: `${base}/api/slow`, failure: 'net::ERR_TIMED_OUT', ms: 4000 }), false);
+  net.failed(fakeRequest({ url: `${base}/file.pdf`, failure: 'net::ERR_ABORTED' }), false);
+
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const view = net.view(texts('en'));
+  assert.match(view.summary, /^🌐 Network: 12 requests · 2\.\d MB · slowest GET \/api\/slow 4\.0 s$/);
+  assert.strictEqual(view.critical, 3);
+  assert.deepStrictEqual(view.lines.map(l => l.level), ['critical', 'critical', 'critical']);
+  assert.strictEqual(view.more, '… and 4 more', 'personal data, repeated and two slow calls; not the large one, the box\'s or the expected error page');
+
+  const r = await net.take();
+  const find = (kind, url) => r.findings.find(f => f.kind === kind && f.url === url);
+  assert.deepStrictEqual({ requests: r.requests, critical: r.critical, warnings: r.warnings, ignored: r.ignored }, { requests: 12, critical: 3, warnings: 6, ignored: 1 });
+  assert.deepStrictEqual(find('secret-field', 'localhost:7001/api/users').keys, ['$.items[].passwordHash']);
+  assert.deepStrictEqual(find('personal-field', 'localhost:7001/api/users').keys, ['$.items[].iban']);
+  assert.deepStrictEqual(find('secret-param', '/api/report').params, ['access_token']);
+  assert.strictEqual(find('slow', '/api/report').ms, 1800);
+  assert.strictEqual(find('repeated', '/api/customers/•••').times, 3);
+  assert.strictEqual(find('large', '/api/export').bytes, 2621440);
+  assert.deepStrictEqual(find('error-detail', '/api/fail'), { kind: 'error-detail', level: 'warn', method: 'GET', url: '/api/fail', status: 500, what: ['stack'], env: true });
+  assert.ok(find('conn-string', '/api/db'));
+  assert.strictEqual(find('slow', '/api/slow').reason, 'net::ERR_TIMED_OUT');
+  assert.deepStrictEqual(find('slow', '•••'), { kind: 'slow', level: 'warn', method: 'POST', url: '•••', ms: 900 }, 'the box\'s request: timed, nothing else');
+  assert.ok(!r.findings.some(f => /auth\/token|cdn\.example/.test(f.url)), 'a token endpoint and another site\'s body are not findings');
+  const text = JSON.stringify(r);
+  for (const leak of ['pw-hash-secret', 'TR330006100519786457841326', 'tok-secret-1', 'at-secret', 'rt-secret', 'third-party-secret', 'box-query-secret',
+    'box-token-secret', 'api/login', 'conn-secret', 'db01', 'Orders.cs', 'page=2', 'hub/negotiate']) assert.ok(!text.includes(leak), leak);
+  assert.strictEqual(await net.take(), undefined, 'take() clears the step');
+
+  // A body still being read when the step is taken belongs to no step.
+  net.finished(fakeRequest({ url: `${base}/api/late`, body: { password: 'late-secret' } }), false);
+  net.clear();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.strictEqual(await net.take(), undefined);
+});
+
+test('network site findings: missing security headers per page, headers that name the server, session cookie flags, uncompressed text', async () => {
+  const net = new network.Network({ base: 'https://app.example.test', config: network.compileConfig(), local: false });
+  net.finished(fakeRequest({ url: 'https://app.example.test/', type: 'document', body: `<html>${'x'.repeat(12000)}</html>`,
+    headers: { 'content-type': 'text/html', server: 'Microsoft-IIS/10.0', 'x-powered-by': 'ASP.NET', 'content-security-policy': "default-src 'self'" },
+    cookies: ['.AspNetCore.Cookies=cookie-secret-1; path=/; samesite=lax', 'XSRF-TOKEN=cookie-secret-2; path=/; secure', 'theme=dark', 'sid=; expires=Thu, 01 Jan 1970 00:00:00 GMT'] }), false);
+  net.finished(fakeRequest({ url: 'https://app.example.test/login', type: 'document', status: 302, headers: { 'content-type': 'text/html' } }), false);
+  net.finished(fakeRequest({ url: 'https://app.example.test/orders', type: 'document', body: '<html></html>',
+    headers: { 'content-type': 'text/html', 'content-encoding': 'br', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'strict-transport-security': 'max-age=1', 'content-security-policy': "default-src 'self'" } }), false);
+  await net.take();
+  const summary = net.summary();
+  assert.strictEqual(summary.local, false);
+  assert.deepStrictEqual(summary.sites['https://app.example.test'], {
+    pages: 2, missing: { 'X-Content-Type-Options': 1, 'X-Frame-Options': 1, 'Strict-Transport-Security': 1 }, revealing: ['Server', 'X-Powered-By'],
+    noHttpOnly: ['.AspNetCore.Cookies'], noSecure: ['.AspNetCore.Cookies'], uncompressed: { count: 1, largest: { method: 'GET', url: '/', bytes: 12013 } },
+  });
+  assert.ok(!JSON.stringify(summary).includes('cookie-secret') && !JSON.stringify(summary).includes('IIS/10'), 'names only');
+});
+
+test('a plan\'s network settings are checked before a browser opens', () => {
+  assert.deepStrictEqual(network.compileConfig(undefined), { slowMs: 1000, origins: [], ignore: [] });
+  assert.deepStrictEqual(network.compileConfig({ slowMs: 2000, origins: ['https://api.example.test/v1'] }).origins, ['https://api.example.test']);
+  for (const [bad, message] of [['x', /must be an object/], [[], /must be an object/], [{ slowMs: 5 }, /slowMs/], [{ slowMs: 1.5 }, /slowMs/],
+    [{ origins: 'x' }, /origins must be an array/], [{ origins: ['ftp://x'] }, /origins\[0\]/], [{ ignore: ['('] }, /network\.ignore\[0\]/], [{ bogus: 1 }, /unknown setting bogus/]]) {
+    assert.throws(() => network.compileConfig(bad), message, JSON.stringify(bad));
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-network-'));
+  const file = path.join(dir, 'slow.steps.js');
+  fs.writeFileSync(file, "module.exports = { network: { slowMs: 'fast' }, steps: [{ title: 'a', run: async () => {} }] };");
+  try {
+    const r = cli('run', file);
+    assert.strictEqual(r.status, 2, r.stderr);
+    assert.match(r.stderr, /network\.slowMs/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  assert.match(cli('run', '6655', '--network').stderr, /No address/, '--network passes on to the next check');
+});
+
+test('the report shows network findings in the summary, the note column, a section with the site, and the paste block', () => {
+  const meta = { totalSteps: 3, titles: ['a', 'b', 'c'], lang: 'en', walkId: 'n-1', planId: 'n', readyAt: '2026-11-09T08:00:00Z',
+    endedAt: '2026-11-09T08:00:10Z', measuredSeconds: 10, result: 'completed', browser: 'chrome', browserSource: 'requested', base: 'http://localhost',
+    network: { local: true, slowMs: 1000, origins: ['http://localhost'], sites: { 'http://localhost': { pages: 3, missing: { 'X-Frame-Options': 3 },
+      revealing: ['X-Powered-By'], noHttpOnly: ['sid'], noSecure: [], uncompressed: { count: 2, largest: { method: 'GET', url: '/app.js', bytes: 245760 } } } } } };
+  const events = [
+    { n: 1, title: 'a', answer: 'pass', network: { requests: 14, bytes: 1258291, slowest: { method: 'GET', url: '/api/customers', ms: 3400 }, critical: 1, warnings: 1, findings: [
+      { kind: 'secret-field', level: 'critical', method: 'GET', url: '/api/customers/•••', keys: ['$.items[].passwordHash'] },
+      { kind: 'repeated', level: 'warn', method: 'GET', url: '/api/tips', times: 3 },
+      { kind: 'error-detail', level: 'warn', method: 'GET', url: '/api/fail', status: 500, what: ['stack', 'sql'], env: true }] } },
+    { n: 2, title: 'b', answer: 'pass', network: { requests: 2, bytes: 900, slowest: { method: 'GET', url: '/x', ms: 12 }, critical: 0, warnings: 0, findings: [], ignored: 4 } },
+    { n: 3, title: 'c', answer: 'diff', note: 'wrong' },
+  ];
+  const { markdown, networkSteps } = report.build(meta, events, null);
+  assert.deepStrictEqual(networkSteps, [1]);
+  assert.match(markdown, /⛔ Critical network findings in steps: 1\.\n\n🌐 Network findings in steps: 1\. See "Network"\./);
+  assert.match(markdown, /\| 1 \| a \| ✔ passed \|  \| 🌐 ⛔ 2 network findings \|/);
+  assert.match(markdown, /## Network\n\n.*never a value or a body.*\n\n\| # \| Step \| Requests \| Size \| Slowest \| Findings \|/);
+  assert.match(markdown, /\| 1 \| a \| 14 \| 1\.2 MB \| GET \/api\/customers 3\.4 s \| ⛔ secret field · ⚠ repeated ×3 \|\n\| 2 \| b \| 2 \| 900 B \| GET \/x 12 ms \|  \|/);
+  assert.match(markdown, /- 1\. a: `⛔ GET \/api\/customers\/•••: secret field in the response: \$\.items\[\]\.passwordHash` · `⚠ GET \/api\/tips 3 times in this step` · `⚠ GET \/api\/fail → 500: stack trace, database error in the error response \(expected in this environment\)`/);
+  assert.match(markdown, /4 requests matched the plan's network\.ignore/);
+  assert.match(markdown, /### Site — http:\/\/localhost \(expected on this machine; check on the test or production server\)\n\n- Missing security headers: X-Frame-Options \(or CSP frame-ancestors\) \(3\/3 pages\)\n- Headers that name the server or its version: X-Powered-By\n- Session cookies without HttpOnly: sid\n- Text responses sent uncompressed: 2 \(largest GET \/app\.js, 240 KB\)/);
+  assert.match(markdown, /\n✔ a \(🌐 ⛔ 2 network findings\)\n✔ b\n/);
+  const tr = report.build({ ...meta, lang: 'tr' }, events, null).markdown;
+  assert.match(tr, /🌐 Ağ bulgusu olan adımlar: 1\./);
+  assert.match(tr, /\| 1 \| a \| 14 \| 1,2 MB \| GET \/api\/customers 3,4 sn \| ⛔ hassas alan · ⚠ tekrar ×3 \|/);
+  const clean = report.build(meta, events.map(e => ({ ...e, network: e.network && { ...e.network, critical: 0, warnings: 0, findings: [] } })), null).markdown;
+  assert.match(clean, /🌐 Network: no findings\./);
+  const { network: _, ...before } = meta;
+  assert.doesNotMatch(report.build(before, events.map(({ network: n, ...e }) => e), null).markdown, /Network|🌐/, 'a walk without --network reads as before');
+});
+
+test('a tracker key such as PROJ-123 resolves like a work item number; a clash with a walk is refused, not guessed', () => {
+  plan('proj-123-login');
+  walk('proj-123-login-1');
+  plan('abc');
+  walk('abc-7');
+  plan('abc-7-orders');
+  assert.deepStrictEqual(store.resolve(P, 'PROJ-123'), { planId: 'proj-123-login', walkId: null });
+  assert.deepStrictEqual(store.resolve(P, 'PROJ-123-1'), { planId: 'proj-123-login', walkId: 'proj-123-login-1' });
+  assert.throws(() => store.resolve(P, 'ABC-7'), e => e instanceof store.ResolveError && /both walk 7 of plan abc and work item ABC-7/.test(e.message)
+    && e.candidates.includes('abc-7') && e.candidates.includes('abc-7-orders'));
+  assert.strictEqual(store.resolve(P, 'abc-7-orders').planId, 'abc-7-orders');
+  assert.throws(() => store.resolve(P, 'abc-8'), /Walk abc-8 does not exist/, 'a plain plan\'s missing walk stays a missing walk');
+  const meta = store.readJson(path.join(store.walkDir(P, 'proj-123-login-1'), 'walk.json'));
+  assert.match(report.build({ ...meta, workItem: 'PROJ-123' }, [], null).markdown, /Work item:\*\* PROJ-123\n/, 'no "#" before a key');
 });
 
 test('--panel takes left or right and/or min, nothing else', () => {

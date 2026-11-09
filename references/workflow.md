@@ -10,16 +10,20 @@ Stop at the first source that answers it:
 1. **The command:** `guided-smoke run 6655`, `guided-smoke plan 6655-machine-expiry`. If the plan exists, use it.
 2. **This session:** the change you and the user just made — decisions, acceptance criteria, screens touched, texts
    added. This is the richest source; prefer it.
-3. **Git:** the branch name (`feature/6655-machine-expiry` → work item 6655, plan id `6655-machine-expiry`), the diff
-   against the branch it came from (`git merge-base`), commits that mention `#6655`.
+3. **Git:** the branch name (`feature/6655-machine-expiry` → work item 6655, plan id `6655-machine-expiry`;
+   `feature/PROJ-123-login` → PROJ-123, plan id `proj-123-login`), the diff against the branch it came from
+   (`git merge-base`), commits that mention the work item the way its tracker links them: `#6655` (GitHub, Azure
+   DevOps), `AB#6655` (Azure Boards from GitHub), `PROJ-123` (Jira, Linear).
 4. **Records:** acceptance criteria in the work item (read only, if a tracker skill and access exist), a handoff or
    design document in the repository.
 
 If none of them tells you what to test (new session, on the main branch, no diff), do not guess. Ask one question and
 offer the recent plans (`node run.js list`) and branches as choices.
 
-**Plan id:** `<work-item>-<short-name>` in lower case (`6655-machine-expiry`), matching the branch slug when there is
-one; without a work item a short name (`login-flow`). Never end a plan id with `-<number>`: that reads as a walk.
+**Plan id:** `<work-item>-<short-name>` in lower case (`6655-machine-expiry`, `proj-123-login`), matching the branch
+slug when there is one; without a work item a short name (`login-flow`). Never end a plan id with `-<number>`: that
+reads as a walk. Pass the work item as the tracker writes it (`--work-item PROJ-123`); the report puts `#` only
+before a number.
 
 ## 2. Preflight (before writing steps)
 
@@ -63,6 +67,8 @@ node <skill-dir>/engine/run.js run <plan-id> --base <url> [--work-item N] [other
   failed, **✔** takes a second click; the report flags such steps. With `--auto`, a step whose check passed goes on by
   itself after a 3 s countdown; **⏸ Wait** or any button keeps it for the user. Suggest `--auto` only for a re-run
   the user already walked once by hand.
+- Suggest `--network` once when the change touches API calls, lists or error handling, or the walk runs on a test
+  server: the panel then also shows the 🌐 line and its ⛔/⚠ findings under each step.
 - Do not poll. Wait until the command finishes.
 
 ## 6. Report

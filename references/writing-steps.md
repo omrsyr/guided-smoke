@@ -14,6 +14,7 @@ module.exports = {
   login: 'account/login',           // regex source for sign-in URLs (optional)
   locale: 'en-US',                  // optional browser locale
   ignoreErrors: ['GET /hub/negotiate → 404'],   // optional: known browser noise (see rule 16)
+  network: { slowMs: 1000, origins: ['https://api.example.com'], ignore: ['/hub/'] },   // optional, for --network (rule 17)
   steps: [ /* … */ ],
 };
 ```
@@ -102,3 +103,17 @@ For an API that needs the user's account, the project's database tool, or a back
     the plan's `ignoreErrors`: regular expressions, or pattern strings (case-insensitive), matched against the line
     the panel shows, e.g. `'GET /hub/negotiate → 404'` or `/WebSocket connection to .* failed/`. Ignored errors are
     still counted as ignored. Never use it to hide an error the change under test causes.
+17. **Network (`--network`).** Under each step the panel also shows a 🌐 line (requests, bytes, the slowest call) and
+    the strong findings. ⛔ critical: a secret field in a JSON answer (`password`, `passwordHash`, `token` outside a
+    sign-in or token endpoint, `secret`, `apiKey`, a card number), a secret in an address (`?access_token=`), part of
+    a connection string in an error answer. ⚠ warning: a call taking 3 × `slowMs` or more, the same call 3 or more
+    times in one step, a personal data field (`iban`, `tckn`, a national id: does this screen need it?), a stack
+    trace or database error in an error answer. The report lists every finding, also calls over `slowMs` and answers
+    over 1 MB, and per site the missing security headers, headers that name the server, session cookies without
+    HttpOnly or Secure, and text sent uncompressed. Headers and bodies are read only for the application's own
+    addresses: the host of `base` on any port, and `network.origins` for an API elsewhere. On a local address the
+    findings a developer machine shows on purpose (the framework's error page, the site's headers) are marked
+    "expected in this environment" and not counted. A critical finding keeps `--auto` from going on; warnings do not.
+    `network.slowMs` (default 1000) sets "slow"; `network.ignore` leaves calls out entirely (patterns matched against
+    `GET /path`): a long poll or a streaming hub, never a finding the change under test causes. A step that expects a
+    finding says so in `expect`, as for browser errors.
