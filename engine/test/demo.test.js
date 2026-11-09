@@ -34,6 +34,14 @@ const signIn = {
   },
 };
 const readEvents = dir => fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+// The panel's title and texts read in one go. Read one after another, the next step's panel can come in between while
+// an --auto countdown runs, and its texts end up under this step's title.
+const readPanel = page => page.evaluate(() => {
+  const p = document.getElementById('__guided_smoke');
+  if (!p) return null;
+  const part = selector => (p.querySelector(selector) || {}).textContent || '';
+  return { title: p.querySelectorAll(':scope > div')[1].textContent, errors: part('[data-guided-smoke-errors]'), all: p.textContent };
+}).catch(() => null);
 
 function loadPlan(lang, withNetwork = false) {
   process.env.GUIDED_SMOKE_LANG = lang;
@@ -163,7 +171,7 @@ test('--network: a critical finding holds --auto and a warning does not; the val
     const { meta } = await autoWalk({
       playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn, letAuto: true, box: { token: secret.box },
       options: { auto: true, network: network.compileConfig(plan.network) },
-      onPanel: async (page, { title }) => { shown[title] = await page.locator('#__guided_smoke').textContent(); },
+      onPanel: async page => { const p = await readPanel(page); if (p) shown[p.title] = p.all; },
     });
     assert.strictEqual(meta.result, 'completed');
     const events = readEvents(walkDir);
@@ -462,7 +470,7 @@ test('browser errors reach the panel as they arrive and hold --auto; the sign-in
   try {
     const { counts } = await autoWalk({
       playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn: noisySignIn, letAuto: true, options: { auto: true },
-      onPanel: async (page, { title }) => { shown[title] = await page.locator('#__guided_smoke [data-guided-smoke-errors]').textContent(); },
+      onPanel: async page => { const p = await readPanel(page); if (p) shown[p.title] = p.errors; },
     });
     const events = readEvents(walkDir);
     assert.deepStrictEqual(events.map(e => [e.title, e.answeredBy || 'user']), [['Clean', 'auto'], ['Late', 'user'], ['Ignored', 'auto'], ['Boxed', 'user']]);
