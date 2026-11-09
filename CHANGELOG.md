@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.1 — 2026-11-09
 
 - **The comparison with the previous walk follows a step by its title.** It matched steps by number, so in a plan
   that gained, lost or moved a step every later step was compared with another one. A step is now the same step when
