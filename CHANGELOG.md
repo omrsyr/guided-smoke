@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.2 — 2026-11-09
 
 - **`--network` no longer reads a translation file's labels as secrets.** In the first walk on a real application, an
   Angular translation file (`assets/i18n/tr.json`) was a critical "secret field" finding: its keys such as
