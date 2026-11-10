@@ -40,7 +40,8 @@ const readPanel = page => page.evaluate(() => {
   const p = document.getElementById('__guided_smoke');
   if (!p) return null;
   const part = selector => (p.querySelector(selector) || {}).textContent || '';
-  return { title: p.querySelectorAll(':scope > div')[1].textContent, errors: part('[data-guided-smoke-errors]'), all: p.textContent };
+  return { title: p.querySelectorAll(':scope > div')[1].textContent, errors: part('[data-guided-smoke-errors]'), all: p.textContent,
+    counting: !!p.querySelector('[data-guided-smoke-countdown]') };
 }).catch(() => null);
 
 function loadPlan(lang, withNetwork = false) {
@@ -455,8 +456,9 @@ test('browser errors reach the panel as they arrive and hold --auto; the sign-in
     ignoreErrors: ['GET /known-noise → 404'],
     steps: [
       { title: 'Clean', did: 'x', expect: ['x'], run: async () => {}, check: ok },
-      // The call fails only after the panel is up and its countdown runs.
-      { title: 'Late', did: 'x', expect: ['x'], run: async ({ page }) => { await page.evaluate(() => { setTimeout(() => fetch('/api/tips'), 800); }); }, check: ok },
+      // Its call fails only once the panel is up and its countdown runs: the harness makes it then (see onPanel). A
+      // timer in the page raced the countdown on a slow machine and could land in the next step.
+      { title: 'Late', did: 'x', expect: ['x'], run: async () => {}, check: ok },
       { title: 'Ignored', did: 'x', expect: ['x'], run: async ({ page }) => { await page.evaluate(() => fetch('/known-noise?user=a@b.test')); }, check: ok },
       { title: 'Boxed', did: 'x', expect: ['x'], run: async ({ page, secretBox }) => {
         await secretBox({ fields: [{ name: 'token', label: 'Token' }] });
@@ -467,11 +469,18 @@ test('browser errors reach the panel as they arrive and hold --auto; the sign-in
   };
   // Noise on the sign-in page is the user's own page, not the walk's.
   const noisySignIn = { when: '#user', fill: async page => { await page.evaluate(() => console.error('noise on the sign-in page')); await signIn.fill(page); } };
+  let lateCall = null;
   try {
     const { counts } = await autoWalk({
       playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn: noisySignIn, letAuto: true, options: { auto: true },
-      onPanel: async page => { const p = await readPanel(page); if (p) shown[p.title] = p.errors; },
+      onPanel: async page => {
+        const p = await readPanel(page);
+        if (!p) return;
+        shown[p.title] = p.errors;
+        if (p.title === 'Late' && p.counting && !lateCall) lateCall = page.evaluate(() => fetch('/api/tips').then(() => 'made')).catch(() => 'failed');
+      },
     });
+    assert.strictEqual(await lateCall, 'made', 'the late call was made while the countdown ran');
     const events = readEvents(walkDir);
     assert.deepStrictEqual(events.map(e => [e.title, e.answeredBy || 'user']), [['Clean', 'auto'], ['Late', 'user'], ['Ignored', 'auto'], ['Boxed', 'user']]);
     assert.strictEqual(events[0].browserErrors, undefined, JSON.stringify(events[0].browserErrors));
