@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 — 2026-11-10
 
 - **`--probe`: probing a form the way an experienced tester would.** A step marked `probe: true` sends one form field
   every value the user approved in the plan, one value at a time, and the panel shows one table of what each led to.
