@@ -787,7 +787,11 @@ test('the report shows a probe in the summary, the note column and a section of 
     { n: 3, title: 'Clean up', kind: 'approve', answer: 'pass' }];
   const { markdown, probeSteps } = report.build(meta('p-2'), probed, null);
   assert.deepStrictEqual(probeSteps, [2]);
-  assert.match(markdown, /🧪 Probing: 3 tries in steps 2; 1 row different \(2\)\./);
+  assert.match(markdown, /🧪 Probing: 3 tries in step 2; 1 row different \(2\)\./);
+  // Two probe steps: the plural.
+  const twice = probed.map(e => (e.n === 3 ? { ...e, probe: probing.record(probing.verdict([rows[0]])) } : e));
+  assert.match(report.build(meta('p-2'), twice, null).markdown, /🧪 Probing: 4 tries in steps 2, 3; 1 row different \(2\)\./);
+  assert.match(report.build({ ...meta('p-2'), lang: 'tr' }, twice, null).markdown, /🧪 Patlatma: 2, 3\. adımlarda 4 deneme; 1 satır farklı \(2\)\./);
   assert.match(markdown, /\| 2 \| Note probed \| ✔ passed \| ✖ 1 of 3 tries different: 2 \| .*🧪 2\/3 as expected \|/);
   assert.match(markdown, /### 2\. Note probed \(3 tries, 1 different\)/);
   assert.match(markdown, /\| ✖ 2 \| `SMOKE-P7 😀` \| saved 📘 \| \*\*💥 crashed \(HTTP 500\)\*\* \| {2}\|/);

@@ -38,7 +38,7 @@ const LABELS = {
     siteNoSecure: 'Session cookies without Secure: {list}', siteUncompressed: 'Text responses sent uncompressed: {count} (largest {call}, {size})',
     siteNone: 'No findings.',
     probe: 'Probing', probeNote: "With --probe each probe step sent its form once per value of the plan. Expected comes from the plan: 🔧 the code, 📘 the catalog, ❓ an assumption. The application's message is kept, cut to 120 characters: it answers the plan's own test value. A long value is shown short (\"x×92\", its length in brackets).",
-    probeSummary: '🧪 Probing: {tries} tries in steps {steps}; {different}.', probeDifferent: ['{n} row different', '{n} rows different'], probeNoneDifferent: 'all as expected',
+    probeSummary: ['🧪 Probing: {tries} tries in step {steps}; {different}.', '🧪 Probing: {tries} tries in steps {steps}; {different}.'], probeDifferent: ['{n} row different', '{n} rows different'], probeNoneDifferent: 'all as expected',
     probeStep: '{tries} tries, {different} different', probeShort: '🧪 {ok}/{tries} as expected', pasteProbe: '🧪 {ok}/{tries}',
     pasteRow: '{value}: expected {expect}, got {got}',
   },
@@ -72,7 +72,7 @@ const LABELS = {
     siteNoSecure: 'Secure olmayan oturum çerezleri: {list}', siteUncompressed: 'Sıkıştırılmadan gönderilen metin yanıtları: {count} (en büyüğü {call}, {size})',
     siteNone: 'Bulgu yok.',
     probe: 'Patlatma', probeNote: '--probe ile her patlatma adımı formunu plandaki her değerle birer kez gönderdi. Beklenen plandan gelir: 🔧 kod, 📘 katalog, ❓ varsayım. Uygulamanın mesajı 120 karaktere kesilerek tutulur: planın kendi test değerine verilen cevaptır. Uzun değer kısaltılmış gösterilir ("x×92", uzunluğu parantezde).',
-    probeSummary: '🧪 Patlatma: {steps}. adımlarda {tries} deneme; {different}.', probeDifferent: ['{n} satır farklı', '{n} satır farklı'], probeNoneDifferent: 'hepsi beklendiği gibi',
+    probeSummary: ['🧪 Patlatma: {steps}. adımda {tries} deneme; {different}.', '🧪 Patlatma: {steps}. adımlarda {tries} deneme; {different}.'], probeDifferent: ['{n} satır farklı', '{n} satır farklı'], probeNoneDifferent: 'hepsi beklendiği gibi',
     probeStep: '{tries} deneme, {different} farklı', probeShort: '🧪 {ok}/{tries} beklendiği gibi', pasteProbe: '🧪 {ok}/{tries}',
     pasteRow: '{value}: beklenen {expect}, olan {got}',
   },
@@ -177,7 +177,7 @@ function build(meta, events, prev) {
     const tries = probed.reduce((sum, e) => sum + e.probe.tries, 0);
     const different = probed.reduce((sum, e) => sum + e.probe.different, 0);
     const what = different ? `${plural(different, L.probeDifferent)} (${probeSteps.join(', ')})` : L.probeNoneDifferent;
-    lines.push('', L.probeSummary.replace('{tries}', tries).replace('{steps}', probed.map(e => e.n).join(', ')).replace('{different}', what));
+    lines.push('', (probed.length === 1 ? L.probeSummary[0] : L.probeSummary[1]).replace('{tries}', tries).replace('{steps}', probed.map(e => e.n).join(', ')).replace('{different}', what));
   }
 
   lines.push('', `## ${L.steps}`, '');
