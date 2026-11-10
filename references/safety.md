@@ -31,7 +31,9 @@
 
 Anything that changes state **outside the page under test** is a permitted step: database writes, files, e-mails or
 messages, calls to external services, clock or configuration changes. Irreversible screen actions may be permitted
-steps too (see writing-steps rule 8).
+steps too (see writing-steps rule 8). A probe step (`probe: true`) is always one: the engine cannot know whether a form
+saves what it is sent, so it asks first, also without an `approve` of the plan's own, and the remote-address rule below
+applies to it.
 
 ```js
 {
@@ -75,6 +77,8 @@ drawn, a request sent and any message logged keep no address, place or text at a
 With `--network`, the headers and bodies of the application's own answers are read in memory and dropped; kept are
 request counts, bytes, times, statuses, paths as above and the names of the fields (`$.items[].passwordHash`), query
 parameters, headers and cookies a finding is about, never their values. A request sent while the value box is drawn
-is counted and timed only. Screenshots are taken only on request
+is counted and timed only. With `--probe`, each try keeps its value as a short label, what was expected and what
+happened, and the application's message to it, cut to 120 characters: the only message text a walk keeps, by design,
+since it answers the plan's own test value. A probe does not run while the value box is drawn. Screenshots are taken only on request
 (📷, `--screens diff|all`) and stay in the walk folder on this machine; they may show personal data, so treat them
 like the screen itself.

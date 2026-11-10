@@ -5,6 +5,7 @@
 const { texts } = require('./i18n');
 const errors = require('./errors');
 const network = require('./network');
+const probing = require('./probe');
 
 const LABELS = {
   en: {
@@ -17,7 +18,7 @@ const LABELS = {
     againstShort: 'automatic check failed',
     byAuto: 'by itself', autoSummary: '{count} of the passed steps went on by themselves (--auto).',
     recordings: 'Recordings', recordingsNote: 'they hold what the screen showed, cookies and page data: keep them on this machine and do not attach them to the work item',
-    pass: 'passed', diff: 'different', skip: 'skipped', none: 'not run', reasons: { filter: 'filter', 'follows-skip': 'follows a skipped step', declined: 'not allowed', 'skip-writes': '--skip-writes', remote: 'remote address' },
+    pass: 'passed', diff: 'different', skip: 'skipped', none: 'not run', reasons: { filter: 'filter', 'follows-skip': 'follows a skipped step', declined: 'not allowed', 'skip-writes': '--skip-writes', remote: 'remote address', probe: 'runs with --probe' },
     errorsSummary: '⚠ Steps where the browser reported errors: {steps}. They are not on the screen; see "Browser errors".',
     errors: 'Browser errors', errorsNote: 'Counted from the browser: script errors, console errors, failed requests and HTTP errors (4xx/5xx). Only the kind, method, path (no query, id-like parts as •••), status and the script\'s place are kept; the messages were shown in the panel only. "•••" alone: the value box was open.',
     errorsIgnored: '{count} more matched the plan\'s ignoreErrors and are not counted.', errorsMore: '+{count} more',
@@ -36,6 +37,10 @@ const LABELS = {
     siteRevealing: 'Headers that name the server or its version: {list}', siteNoHttpOnly: 'Session cookies without HttpOnly: {list}',
     siteNoSecure: 'Session cookies without Secure: {list}', siteUncompressed: 'Text responses sent uncompressed: {count} (largest {call}, {size})',
     siteNone: 'No findings.',
+    probe: 'Probing', probeNote: "With --probe each probe step sent its form once per value of the plan. Expected comes from the plan: 🔧 the code, 📘 the catalog, ❓ an assumption. The application's message is kept, cut to 120 characters: it answers the plan's own test value. A long value is shown short (\"x×92\", its length in brackets).",
+    probeSummary: '🧪 Probing: {tries} tries in steps {steps}; {different}.', probeDifferent: ['{n} row different', '{n} rows different'], probeNoneDifferent: 'all as expected',
+    probeStep: '{tries} tries, {different} different', probeShort: '🧪 {ok}/{tries} as expected', pasteProbe: '🧪 {ok}/{tries}',
+    pasteRow: '{value}: expected {expect}, got {got}',
   },
   tr: {
     title: 'Smoke raporu', plan: 'Plan', workItem: 'İş', date: 'Tarih', measured: 'Ölçülen koşu süresi',
@@ -47,7 +52,7 @@ const LABELS = {
     againstShort: 'otomatik kontrol ✖',
     byAuto: 'kendiliğinden', autoSummary: 'Geçen adımların {count} tanesi kendiliğinden geçti (--auto).',
     recordings: 'Kayıtlar', recordingsNote: 'ekranda görüneni, çerezleri ve sayfa verisini içerir: bu makinede tut, iş kaydına ekleme',
-    pass: 'geçti', diff: 'farklı', skip: 'atlandı', none: 'koşulmadı', reasons: { filter: 'filtre', 'follows-skip': 'atlanan adımı izliyor', declined: 'izin verilmedi', 'skip-writes': '--skip-writes', remote: 'uzak adres' },
+    pass: 'geçti', diff: 'farklı', skip: 'atlandı', none: 'koşulmadı', reasons: { filter: 'filtre', 'follows-skip': 'atlanan adımı izliyor', declined: 'izin verilmedi', 'skip-writes': '--skip-writes', remote: 'uzak adres', probe: '--probe ile koşar' },
     errorsSummary: '⚠ Tarayıcının hata bildirdiği adımlar: {steps}. Bunlar ekranda görünmez; bkz. "Tarayıcı hataları".',
     errors: 'Tarayıcı hataları', errorsNote: 'Tarayıcıdan sayıldı: JS hataları, konsol hataları, düşen istekler ve HTTP hataları (4xx/5xx). Yalnız tür, yöntem, yol (sorgusuz, kimlik benzeri parçalar •••), durum kodu ve betiğin yeri tutulur; mesajlar yalnız panelde gösterildi. Tek başına "•••": değer kutusu açıktı.',
     errorsIgnored: '{count} tanesi daha planın ignoreErrors listesine uydu, sayılmadı.', errorsMore: '+{count} tane daha',
@@ -66,6 +71,10 @@ const LABELS = {
     siteRevealing: 'Sunucuyu ya da sürümünü söyleyen başlıklar: {list}', siteNoHttpOnly: 'HttpOnly olmayan oturum çerezleri: {list}',
     siteNoSecure: 'Secure olmayan oturum çerezleri: {list}', siteUncompressed: 'Sıkıştırılmadan gönderilen metin yanıtları: {count} (en büyüğü {call}, {size})',
     siteNone: 'Bulgu yok.',
+    probe: 'Patlatma', probeNote: '--probe ile her patlatma adımı formunu plandaki her değerle birer kez gönderdi. Beklenen plandan gelir: 🔧 kod, 📘 katalog, ❓ varsayım. Uygulamanın mesajı 120 karaktere kesilerek tutulur: planın kendi test değerine verilen cevaptır. Uzun değer kısaltılmış gösterilir ("x×92", uzunluğu parantezde).',
+    probeSummary: '🧪 Patlatma: {steps}. adımlarda {tries} deneme; {different}.', probeDifferent: ['{n} satır farklı', '{n} satır farklı'], probeNoneDifferent: 'hepsi beklendiği gibi',
+    probeStep: '{tries} deneme, {different} farklı', probeShort: '🧪 {ok}/{tries} beklendiği gibi', pasteProbe: '🧪 {ok}/{tries}',
+    pasteRow: '{value}: beklenen {expect}, olan {got}',
   },
 };
 
@@ -129,6 +138,10 @@ function build(meta, events, prev) {
   // What the network did (--network): counted findings per step; the ones a local walk expects are listed, not counted.
   const networkSteps = [...states.values()].filter(e => network.findingTotal(e.network)).map(e => e.n).sort((a, b) => a - b);
   const criticalSteps = [...states.values()].filter(e => e.network && e.network.critical).map(e => e.n).sort((a, b) => a - b);
+  // Probing (--probe): the tries of each probe step and the rows that differ from the plan's expectation.
+  const probed = [...states.values()].filter(e => e.probe && e.probe.tries).sort((a, b) => a.n - b.n);
+  const probeSteps = probed.filter(e => e.probe.different).map(e => e.n);
+  const probeNote = e => (e.probe && e.probe.tries ? L.probeShort.replace('{ok}', e.probe.tries - e.probe.different).replace('{tries}', e.probe.tries) : null);
   const networkNote = e => {
     const n = network.findingTotal(e.network);
     return n ? `🌐 ${e.network.critical ? '⛔ ' : ''}${plural(n, L.networkFindings)}` : null;
@@ -160,6 +173,12 @@ function build(meta, events, prev) {
     if (criticalSteps.length) lines.push('', L.networkCritical.replace('{steps}', criticalSteps.join(', ')));
     lines.push('', networkSteps.length ? L.networkSummary.replace('{steps}', networkSteps.join(', ')) : L.networkNone);
   }
+  if (probed.length) {
+    const tries = probed.reduce((sum, e) => sum + e.probe.tries, 0);
+    const different = probed.reduce((sum, e) => sum + e.probe.different, 0);
+    const what = different ? `${plural(different, L.probeDifferent)} (${probeSteps.join(', ')})` : L.probeNoneDifferent;
+    lines.push('', L.probeSummary.replace('{tries}', tries).replace('{steps}', probed.map(e => e.n).join(', ')).replace('{different}', what));
+  }
 
   lines.push('', `## ${L.steps}`, '');
   lines.push(`| # | ${L.step} | ${L.outcome} | ${L.auto} | ${L.note} | ${L.shot} |`);
@@ -175,7 +194,7 @@ function build(meta, events, prev) {
     }
     const auto = e && e.auto ? `${e.auto.ok ? '✔' : '✖'} ${e.auto.text}` : '';
     const browser = e && errors.total(e.browserErrors) ? `⚠ ${t.errIn}${errors.countsText(e.browserErrors, t)}` : null;
-    const note = e ? [e.answer === 'pass' && e.againstCheck ? `⚠ ${L.against}` : null, e.note, e.error, ...(e.warnings || []), browser, networkNote(e)].filter(Boolean).join(' · ') : '';
+    const note = e ? [e.answer === 'pass' && e.againstCheck ? `⚠ ${L.against}` : null, e.note, e.error, ...(e.warnings || []), browser, networkNote(e), probeNote(e)].filter(Boolean).join(' · ') : '';
     const shot = e && e.screenshot ? `[${e.screenshot}](${e.screenshot})` : '';
     lines.push(`| ${n} | ${cell(title)} | ${cell(outcome)} | ${cell(auto)} | ${cell(note)} | ${shot} |`);
   }
@@ -193,6 +212,7 @@ function build(meta, events, prev) {
   }
 
   if (meta.network) lines.push(...networkSection(meta, states, L, t));
+  if (probed.length) lines.push(...probeSection(probed, L, t));
 
   const earlier = !prev ? [] : Array.isArray(prev) ? prev : [prev];
   if (earlier.length) {
@@ -207,15 +227,21 @@ function build(meta, events, prev) {
   for (let n = 1; n <= meta.totalSteps; n++) {
     const e = states.get(n);
     if (!e || e.answer === 'stop') continue;
-    if (e.answer === 'skip' && e.reason === 'filter') continue;
+    if (e.answer === 'skip' && (e.reason === 'filter' || e.reason === 'probe')) continue;
     const browser = errors.total(e.browserErrors);
     const net = networkNote(e);
-    lines.push(`${ICON[e.answer]} ${e.title}${e.answeredBy === 'auto' ? ` (${L.byAuto})` : ''}${e.answer === 'pass' && e.againstCheck ? ` (⚠ ${L.againstShort})` : ''}${browser ? ` (⚠ ${plural(browser, L.pasteErrors)})` : ''}${net ? ` (${net})` : ''}${e.note ? ` — ${e.note}` : ''}`);
+    const tried = e.probe && e.probe.tries ? L.pasteProbe.replace('{ok}', e.probe.tries - e.probe.different).replace('{tries}', e.probe.tries) : null;
+    lines.push(`${ICON[e.answer]} ${e.title}${e.answeredBy === 'auto' ? ` (${L.byAuto})` : ''}${e.answer === 'pass' && e.againstCheck ? ` (⚠ ${L.againstShort})` : ''}${browser ? ` (⚠ ${plural(browser, L.pasteErrors)})` : ''}${net ? ` (${net})` : ''}${tried ? ` (${tried})` : ''}${e.note ? ` — ${e.note}` : ''}`);
+    // Of a probe only the rows that differ go to the work item, each with what the application said.
+    for (const r of tried ? e.probe.rows.filter(x => !x.ok) : []) {
+      const row = L.pasteRow.replace('{value}', r.value).replace('{expect}', probing.expectText(r, t)).replace('{got}', probing.gotText(r, t));
+      lines.push(`   ✖ ${row}${r.message ? ` — "${r.message}"` : ''}`);
+    }
   }
   lines.push(`${L.measured}: ${duration(meta.measuredSeconds, lang)}`);
   lines.push('```', '');
 
-  return { markdown: lines.join('\n'), counts: c, against, errorSteps, networkSteps };
+  return { markdown: lines.join('\n'), counts: c, against, errorSteps, networkSteps, probeSteps };
 }
 
 /** A walk's steps as "title#k" (the k-th step with that title), by number. */
@@ -257,7 +283,8 @@ function compare(meta, states, earlier, L) {
       const e = w.done.get(m);
       const answer = e ? e.answer : 'none';
       if (answer === 'pass' || answer === 'diff') return { w, m, answer };
-      if (!held) held = { w, m, answer };
+      // A walk without --probe did not walk a probe step: it holds nothing to compare with.
+      if (!held && !(e && e.reason === 'probe')) held = { w, m, answer };
     }
     return held;
   };
@@ -266,7 +293,8 @@ function compare(meta, states, earlier, L) {
   const used = new Set();
   for (const [n, key] of now) {
     const b = states.get(n);
-    if (!b || b.reason === 'filter') continue;
+    // Not walked in this walk: filtered out, or a probe step without --probe.
+    if (!b || b.reason === 'filter' || b.reason === 'probe') continue;
     const base = baseline(n, key);
     if (!base) {
       rows.push({ text: `- ${n}. ${cell(b.title)}: ${L.newStep} → ${icon(b.answer)}` });
@@ -290,6 +318,23 @@ function compare(meta, states, earlier, L) {
 }
 
 const code = text =>`\`${String(text).replace(/`/g, "'")}\``;
+
+/** The "Probing" section: per probe step its table of tries, the rows that differ marked, then the table's notes. */
+function probeSection(probed, L, t) {
+  const lines = ['', `## ${L.probe}`, '', L.probeNote];
+  for (const e of probed) {
+    const p = e.probe;
+    lines.push('', `### ${e.n}. ${cell(e.title)} (${L.probeStep.replace('{tries}', p.tries).replace('{different}', p.different)})`, '');
+    const tbl = probing.table(p, t);
+    lines.push(`| ${tbl.head.join(' | ')} |`, `|${tbl.head.map(() => '---').join('|')}|`);
+    for (const r of tbl.rows) {
+      const [n, value, expect, got, message] = r.cells;
+      lines.push(`| ${r.bad ? `✖ ${n}` : n} | ${cell(code(value))} | ${cell(expect)} | ${cell(r.bad ? `**${got}**` : got)} | ${cell(message)} |`);
+    }
+    if (tbl.notes.length) lines.push('', ...tbl.notes.map(x => `- ${x}`));
+  }
+  return lines;
+}
 
 /** The "Network" section: a row per step that ran with --network, its findings, then each of the application's sites. */
 function networkSection(meta, states, L, t) {

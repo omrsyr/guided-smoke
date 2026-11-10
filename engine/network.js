@@ -277,6 +277,14 @@ class Network {
     this.found = new Map();
   }
 
+  /**
+   * Starts counting "the same call" again within the step. A probe sends a form once per value, and a call made once
+   * per try is not a call repeated by the screen.
+   */
+  restartRepeats() {
+    this.calls = new Map();
+  }
+
   /** The application's own address: the walk's host on any port, or one of the plan's network.origins. */
   own(raw) {
     try {

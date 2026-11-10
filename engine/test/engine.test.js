@@ -13,6 +13,7 @@ const store = require('../store');
 const report = require('../report');
 const errors = require('../errors');
 const network = require('../network');
+const probing = require('../probe');
 const { texts } = require('../i18n');
 const { isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
 const RUN = path.join(__dirname, '..', 'run.js');
@@ -703,6 +704,138 @@ test('the repository\'s text files use LF line endings', () => {
   };
   scan(root);
   assert.deepStrictEqual(crlf, []);
+});
+
+// ---- probing (--probe) ----
+
+const fakeLocator = () => ({ evaluateAll: async () => [], click: async () => {} });
+const probeValue = (value, expect, from) => ({ value, expect, from, label: probing.label(value, texts('en')) });
+
+test('a probe spec is checked before anything is sent: locators, values, expectations and where they come from', () => {
+  const t = texts('en');
+  const ok = { field: fakeLocator(), submit: fakeLocator(), saved: fakeLocator(), values: [{ value: '', expect: 'blocked', from: 'code' }] };
+  const checked = probing.checkSpec(ok, t);
+  assert.deepStrictEqual([checked.values[0].label, checked.timeout, checked.message, checked.reset], ['(empty)', 5000, null, null]);
+  assert.strictEqual(probing.checkSpec({ ...ok, saved: () => true, values: [{ value: 'a', expect: 'saved', from: 'assumed', label: 'one a' }] }, t).values[0].label, 'one a');
+  const bad = [
+    [{ ...ok, field: '#note' }, /field must be a locator/],
+    [{ ...ok, submit: undefined }, /submit must be a locator/],
+    [{ ...ok, saved: true }, /saved must be a locator/],
+    [{ ...ok, message: '.error' }, /message must be a locator/],
+    [{ ...ok, reset: 'reload' }, /reset must be a function/],
+    [{ ...ok, values: [] }, /values must be a non-empty array/],
+    [{ ...ok, values: [{ value: 5, expect: 'saved', from: 'code' }] }, /values\[0\]\.value must be a string/],
+    [{ ...ok, values: [{ value: 'a', expect: 'accepted', from: 'code' }] }, /values\[0\]\.expect must be one of: saved, trimmed, rejected, blocked/],
+    [{ ...ok, values: [{ value: 'a', expect: 'saved' }] }, /values\[0\]\.from must be one of: code, catalog, assumed/],
+    [{ ...ok, values: Array.from({ length: 51 }, () => ok.values[0]) }, /at most 50 values/],
+    [{ ...ok, timeout: 100 }, /timeout must be/],
+    // The catalog lives in references/probing.md: a plan lists the values it was approved with.
+    [{ ...ok, catalog: 'text' }, /unknown setting catalog/],
+  ];
+  for (const [spec, re] of bad) assert.throws(() => probing.checkSpec(spec, t), re);
+});
+
+test('a probe value reads short, a row matches its expectation, and the table says what each row means', () => {
+  const t = texts('en');
+  assert.deepStrictEqual(['', '   ', `SMOKE-P1 ${'x'.repeat(91)}`, 'x'.repeat(10000), '  a  ', 'a\nb', `ééé${'y'.repeat(60)}`].map(v => probing.label(v, t)),
+    ['(empty)', '(only spaces ×3)', 'SMOKE-P1 x×91 (100)', 'x×10000', '␣␣a␣␣', 'a⏎b', 'éééy×60 (63)']);
+  assert.match(probing.label('abcdefghij'.repeat(10), t), /^abcdefghij.{37}… \(100\)$/);
+
+  const outcomes = { saved: { got: 'saved' }, trimmed: { got: 'saved', changed: { typed: 8, kept: 5 } }, rejected: { got: 'rejected' },
+    blocked: { got: 'blocked' }, crashed: { got: 'crashed' }, unclear: { got: 'unclear' } };
+  const matching = Object.fromEntries(probing.EXPECTS.map(x => [x, Object.keys(outcomes).filter(k => probing.matches(x, outcomes[k]))]));
+  assert.deepStrictEqual(matching, { saved: ['saved'], trimmed: ['trimmed'], rejected: ['rejected', 'blocked'], blocked: ['blocked'] });
+
+  const rows = [
+    probing.row(1, probeValue('', 'blocked', 'code'), { got: 'blocked', why: 'validity', message: 'Please fill out this field.' }),
+    probing.row(2, probeValue('x'.repeat(101), 'rejected', 'code'), { got: 'saved' }),
+    probing.row(3, probeValue('a', 'saved', 'assumed'), { got: 'rejected', message: 'm'.repeat(200), status: 422 }),
+  ];
+  assert.strictEqual(rows[2].message.length, probing.MESSAGE_MAX);
+  const result = probing.verdict(rows);
+  assert.deepStrictEqual([result.tries, result.different, result.differentRows], [3, 2, [2, 3]]);
+  assert.deepStrictEqual(probing.check(result, t), { ok: false, text: '2 of 3 tries different: 2, 3' });
+  assert.deepStrictEqual(probing.check(probing.verdict([rows[0]]), t), { ok: true, text: '1 try, as expected' });
+  const table = probing.table(result, t);
+  assert.deepStrictEqual(table.rows.map(r => r.bad), [false, true, true]);
+  assert.deepStrictEqual(table.rows[0].cells, ['1', '(empty)', 'not sent 🔧', '🛑 not sent (browser check)', 'Please fill out this field.']);
+  assert.deepStrictEqual(table.notes, [t.probeNoteBlocked, t.probeNoteAssumed]);
+  assert.deepStrictEqual(probing.table(probing.verdict([rows[1]]), t).notes, [], 'no row not sent, no assumption that differs: no notes');
+  assert.strictEqual(probing.gotText({ got: 'crashed', why: 'server', status: 500 }, t), '💥 crashed (HTTP 500)');
+  assert.strictEqual(probing.gotText({ got: 'rejected', why: 'http', status: 400 }, t), '⛔ refused (HTTP 400, nothing on the screen)');
+  assert.strictEqual(probing.gotText({ got: 'rejected', status: 422 }, t), '⛔ refused · HTTP 422');
+  assert.strictEqual(probing.gotText({ got: 'saved', changed: { typed: 8, kept: 5 } }, t), '✔ saved ✂ 5/8 characters kept');
+  assert.strictEqual(probing.gotText({ got: 'unclear', why: 'timeout', waited: 5 }, t), '❔ unclear (nothing seen within 5 s)');
+  // Both languages name every expectation, outcome and reason.
+  for (const key of ['probeExpect', 'probeGot', 'probeWhy', 'probeHead']) assert.deepStrictEqual(Object.keys(texts('tr')[key]).sort(), Object.keys(t[key]).sort(), key);
+  assert.deepStrictEqual(Object.keys(t.probeExpect).sort(), [...probing.EXPECTS].sort());
+  assert.deepStrictEqual(Object.keys(t.probeGot).sort(), [...probing.GOTS].sort());
+});
+
+test('the report shows a probe in the summary, the note column and a section of its own, and pastes only the rows that differ; a walk without --probe adds no noise to the comparison', () => {
+  const meta = (walkId, probe = true) => ({ walkId, planId: 'p', totalSteps: 3, titles: ['Open', 'Note probed', 'Clean up'], lang: 'en',
+    readyAt: '2026-11-10T08:00:00Z', endedAt: '2026-11-10T08:01:00Z', measuredSeconds: 60, result: 'completed', browser: 'chrome',
+    browserSource: 'requested', base: 'http://localhost', probe });
+  const rows = [
+    probing.row(1, probeValue('', 'blocked', 'code'), { got: 'blocked', why: 'validity', message: 'Please fill out this field.' }),
+    probing.row(2, probeValue('SMOKE-P7 😀', 'saved', 'catalog'), { got: 'crashed', why: 'server', status: 500 }),
+    probing.row(3, probeValue('a|b', 'saved', 'code'), { got: 'saved' }),
+  ];
+  const result = probing.verdict(rows);
+  const probed = [{ n: 1, title: 'Open', answer: 'pass' },
+    { n: 2, title: 'Note probed', kind: 'approve', answer: 'pass', auto: probing.check(result, texts('en')), againstCheck: true, probe: probing.record(result) },
+    { n: 3, title: 'Clean up', kind: 'approve', answer: 'pass' }];
+  const { markdown, probeSteps } = report.build(meta('p-2'), probed, null);
+  assert.deepStrictEqual(probeSteps, [2]);
+  assert.match(markdown, /🧪 Probing: 3 tries in steps 2; 1 row different \(2\)\./);
+  assert.match(markdown, /\| 2 \| Note probed \| ✔ passed \| ✖ 1 of 3 tries different: 2 \| .*🧪 2\/3 as expected \|/);
+  assert.match(markdown, /### 2\. Note probed \(3 tries, 1 different\)/);
+  assert.match(markdown, /\| ✖ 2 \| `SMOKE-P7 😀` \| saved 📘 \| \*\*💥 crashed \(HTTP 500\)\*\* \| {2}\|/);
+  assert.match(markdown, /\| 3 \| `a\\\|b` \| saved 🔧 \| ✔ saved \|/, 'a pipe in a value does not break the table');
+  assert.match(markdown, /- 🛑 "not sent": the browser or the screen kept the value back/);
+  const paste = markdown.split('To paste')[1];
+  assert.match(paste, /✔ Note probed \(⚠ automatic check failed\) \(🧪 2\/3\)\n {3}✖ SMOKE-P7 😀: expected saved 📘, got 💥 crashed \(HTTP 500\)\n/);
+  assert.doesNotMatch(paste, /Please fill out/, 'a row as expected stays out of the work item');
+
+  // Without --probe the probe steps read "runs with --probe": not in the paste block, not "✔ → ⏭" in the comparison.
+  const plain = { meta: meta('p-3', false), events: [{ n: 1, title: 'Open', answer: 'pass' }, { n: 2, title: 'Note probed', answer: 'skip', reason: 'probe' }, { n: 3, title: 'Clean up', answer: 'skip', reason: 'probe' }] };
+  const r3 = report.build(plain.meta, plain.events, [{ meta: meta('p-2'), events: probed }]).markdown;
+  assert.match(r3, /\| 2 \| Note probed \| ⏭ skipped \(runs with --probe\) \|/);
+  assert.match(r3, /## Compared with \(p-2\)\n\nNo change in results\./);
+  assert.doesNotMatch(r3.split('To paste')[1], /Note probed|Clean up/);
+  // The next walk with --probe compares the probe step with the walk that last ran it.
+  const again = [{ n: 1, title: 'Open', answer: 'pass' }, { n: 2, title: 'Note probed', answer: 'diff', note: 'emoji' }, { n: 3, title: 'Clean up', answer: 'pass' }];
+  assert.match(report.build(meta('p-4'), again, [plain, { meta: meta('p-2'), events: probed }]).markdown,
+    /## Compared with \(p-3, p-2\)\n\n- 2\. Note probed: ✔ → ✖ · p-2\n\n/);
+});
+
+test('a probe step runs only with --probe: named without it, it is refused before a browser opens; probe is true or false', () => {
+  const id = '7002-probe';
+  fs.mkdirSync(store.planDir(P, id), { recursive: true });
+  fs.writeFileSync(store.planFile(P, id), "module.exports = { base: 'http://localhost:1', steps: [{ title: 'a', run: async () => {} }, { title: 'b', probe: true, run: async () => {} }] };");
+  const only = cli('run', id, '--only', '2');
+  assert.strictEqual(only.status, 2);
+  assert.match(only.stderr, /Step 2 is a probe step: add --probe to run it\./);
+  walk(`${id}-1`, { totalSteps: 2, titles: ['a', 'b'] }, [{ n: 1, title: 'a', answer: 'diff' }, { n: 2, title: 'b', answer: 'diff' }]);
+  const retry = cli('run', id, '--retry-failed');
+  assert.strictEqual(retry.status, 2);
+  assert.match(retry.stderr, /Step 2 is a probe step/);
+  fs.writeFileSync(store.planFile(P, id), "module.exports = { base: 'http://localhost:1', steps: [{ title: 'b', probe: 'yes', run: async () => {} }] };");
+  const bad = cli('run', id);
+  assert.strictEqual(bad.status, 2);
+  assert.match(bad.stderr, /step 1 probe must be true or false/);
+});
+
+test('each try of a probe counts "the same call" again: a call made once per try is not a repeated call', async () => {
+  const base = 'https://localhost:5001';
+  const net = new network.Network({ base, config: network.compileConfig(), local: true });
+  for (let i = 0; i < 4; i++) {
+    net.restartRepeats();
+    net.finished(fakeRequest({ url: `${base}/api/config` }), false);
+  }
+  assert.ok(!(await net.take()).findings.some(f => f.kind === 'repeated'));
+  for (let i = 0; i < 3; i++) net.finished(fakeRequest({ url: `${base}/api/config` }), false);
+  assert.strictEqual((await net.take()).findings.find(f => f.kind === 'repeated').times, 3);
 });
 
 test.after(() => fs.rmSync(home, { recursive: true, force: true }));

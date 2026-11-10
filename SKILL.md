@@ -24,8 +24,9 @@ A smoke the user can follow. The script drives a visible browser one step at a t
 the user: **✔ Correct, continue**, **✖ Different** (with a note) or **■ Stop**. Steps that change something outside the
 page (a database row, a file, an e-mail) ask first. Under each step the panel also shows what the screen does not: the
 script errors, console errors and failed requests the browser reported, and with `--network` what the network did:
-slow, repeated or large calls, and secrets or personal data the application sends where it should not. Every answer is
-written down at once; the report says what passed, what differed, where the browser reported errors, how long the walk
+slow, repeated or large calls, and secrets or personal data the application sends where it should not. With `--probe`
+the plan's probe steps send a form field the boundary and wrong values an experienced tester would try, and the user
+reads one table of what each value led to. Every answer is written down at once; the report says what passed, what differed, where the browser reported errors, how long the walk
 took and what changed since each step was last walked.
 
 ## Activation boundary
@@ -40,6 +41,7 @@ suggestion: prepare the plan and ask only for its approval. Never open the brows
 ```text
 guided-smoke                          prepare a plan for the current work, show it, run it after approval
 guided-smoke plan [<id>]              prepare (or show) a plan only — no browser
+guided-smoke plan --probe [<id>]      add probe steps: boundary and wrong values for the change's form fields
 guided-smoke run <ref>                run a plan: a new walk is numbered after the last one
 guided-smoke list                     plans and walks of this project
 guided-smoke report <ref>             report of a walk (default: the latest walk of the plan)
@@ -65,9 +67,10 @@ Flags (order free; unknown flags and bad values are refused with a clear message
 | `--screens diff\|all` | Screenshots on ✖ answers or on every step (default: none; the panel always has a 📷 button) |
 | `--locale tr-TR\|en-US` | Browser language and locale (date inputs, validation messages). Default: the plan's `locale`, else the system's |
 | `--fresh` | Throw-away browser profile for this walk (sign in again, nothing kept) |
-| `--auto` | A step whose automatic check passed without plan warnings goes on by itself after a 3 s countdown (⏸ Wait or any button stops it). Failed or missing checks, permitted steps and value-box waits always wait. The report marks such steps "by itself" |
+| `--auto` | A step whose automatic check passed without plan warnings goes on by itself after a 3 s countdown (⏸ Wait or any button stops it). Failed or missing checks, permitted steps, probe steps and value-box waits always wait. The report marks such steps "by itself" |
 | `--panel left|right[,min]` | Panel corner (the value box takes the other one); `min` starts it minimized. The user's minimize choice carries over |
 | `--network` | Under each step also what the network did: requests, bytes, the slowest call, and findings (slow, repeated or large calls; a secret field, a secret in an address, a connection string or stack trace in an error answer; personal data fields). A critical finding keeps `--auto` from going on. The report gets a "Network" section with the site's security headers and cookie flags. Only names and numbers are recorded, never a value (see [writing steps](references/writing-steps.md) rule 17) |
+| `--probe` | Walk the plan's probe steps (skipped without it): each sends one form field every value the user approved, and the panel shows a table of what each led to (💥 crashed · 🛑 not sent · ⛔ refused · ✔ saved · ❔ unclear) against its expectation. A probe step asks first, never goes on by itself under `--auto`, and records the application's message to each value (at most 120 characters). See [probing](references/probing.md) |
 | `--video` | Record the walk as `video/walk.webm` in the walk folder. Needs Playwright's ffmpeg once (`setup --video`, about 4 MB; ask first) |
 | `--trace` | Record a Playwright trace after the sign-in, in parts (`trace-1.zip`, …) that leave out the value box. Open with `npx playwright show-trace` |
 | `--reset-login` | Delete this project's saved sign-in (`node engine/run.js reset-login`) |
@@ -100,6 +103,7 @@ The project is the git repository's folder name (override with `--project`). Dat
 - `guided-smoke` and `plan`: [workflow](references/workflow.md) and [writing steps](references/writing-steps.md);
   [patterns](references/patterns.md) when a step calls an API with an account, uses the project's database tool or
   waits for a background job.
+- `plan --probe`, or a request to probe a form ("patlat", "boundary values"): [probing](references/probing.md).
 - `run`: [workflow](references/workflow.md) (preflight and while it runs).
 - `report`, and after every walk: [report](references/report.md).
 

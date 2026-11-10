@@ -22,6 +22,11 @@ rebuilds it. It contains:
   headers that name the server, session cookie flags, text sent uncompressed. On a local address all of it is
   expected there, to be checked on the test or production server. The summary names the steps with findings, and the
   paste block counts them.
+- **Probing** (only with `--probe`): per probe step its table of tries (value, expected with its origin, what
+  happened, the application's message), the rows that differ marked ✖, and notes: values not sent did not test the
+  server; an assumed expectation that differs is doubted first. The summary counts tries and differing rows; the note
+  column says "🧪 10/11 as expected"; the paste block lists only the rows that differ. A probe step skipped without
+  `--probe` reads "runs with --probe" and stays out of the comparison and the paste block.
 - **Compared with earlier walks** of the same plan: every step whose result changed (`✖ → ✔`), each against the newest
   earlier walk in which that step was answered ✔ or ✖, so a walk stopped early or a `--retry-failed` walk adds no
   noise. The heading names the walks compared with, and with several each line names its own. Steps are matched by
@@ -40,7 +45,10 @@ Keep it short:
    the environment, suggest `ignoreErrors`. With `--network`, every ⛔ finding (a secret where it should not be:
    name the field or parameter and the call) and the ⚠ ones worth a change (a slow or repeated call, personal data
    the screen does not show); for a remote address also the site's missing headers and cookie flags. Never a value.
-3. The next action: fix and `--retry-failed`, or "all passed".
+   With `--probe`, every red row: the value, what was expected and what happened, and whether it is a bug (a crash, a
+   value saved that should be refused) or an expectation to revisit (❓). Say when 🛑 rows mean the server was not
+   tested.
+3. The next action: fix and `--retry-failed` (with `--probe` for a probe step), or "all passed".
 
 ## Effort
 

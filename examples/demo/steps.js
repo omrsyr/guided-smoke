@@ -2,8 +2,9 @@
 // It shows every kind of step: a plain one, a form submit, a validation the browser blocks, a download, the
 // application's own dialog, permitted steps that change data outside the page, a background job waited for with
 // poll(), API calls with an account the user types into the value box, and a page whose background call fails (the
-// panel shows it; with --network also what its other background calls send and cost). Copy the shapes; the selectors
-// are the demo's.
+// panel shows it; with --network also what its other background calls send and cost). The last four are probe steps,
+// walked only with --probe: two fields sent with boundary and wrong values, a double click, and the clean-up of what the
+// probe saved. Copy the shapes; the selectors are the demo's.
 const { pickLanguage, texts } = require('../../engine/i18n');
 const { countsText } = require('../../engine/errors');
 const { findingLine } = require('../../engine/network');
@@ -19,6 +20,11 @@ const network = process.env.GUIDED_SMOKE_DEMO_NETWORK === '1';
 const netLine = f => findingLine(f, texts(lang));
 const profileLeak = netLine({ kind: 'secret-field', level: 'critical', method: 'GET', url: '/api/profile', keys: ['$.passwordHash'] });
 const settingsTwice = netLine({ kind: 'repeated', level: 'warn', method: 'GET', url: '/api/settings', times: 3 });
+// A probe value the demo may save starts with "SMOKE-P", so the clean-up finds it; `at(prefix, n)` fills it to n characters.
+const PREFIX = 'SMOKE-P';
+const at = (prefix, n) => prefix + 'x'.repeat(n - prefix.length);
+const farDay = '9999-12-31';
+const noDay = '2027-02-29';
 
 const P = {
   en: {
@@ -42,6 +48,23 @@ const P = {
     s13: ['The calls are listed on the order page', `I reloaded order 1001 (the page load cleared the box), removed the box and outlined "${A.calls}".`, ['Newest first: login · Refused, check · SMOKE-A · Valid, login · SignedIn.']],
     s14: ['Help page', `I opened "${A.help}" ▸ "${A.helpTitle}".`, [`The paragraph begins "${A.helpDue.split('. ')[0]}."`, `Under the step the panel shows "${browser({ js: 1, http: 1 })}": the page loads its tips with GET /api/tips, which the demo fails on purpose. Nothing on the screen shows it.`]],
     s14network: `With --network the panel also shows "${profileLeak}" (the profile call sends a password hash) and "${settingsTwice}"; once GET /api/help/stats has finished (about 1.5 s), the 🌐 line names it the slowest call.`,
+    s15: ['Note field probed', `I sent the "${A.notes}" form of order 1001 with 11 values, one at a time, opening the order again before each.`, [
+      'A table of 11 tries. Not sent: empty (the browser). Refused: only spaces, 101 and 10,000 characters. Saved: 100 characters, quotes and brackets, a script tag, a piece of SQL, Turkish letters, and spaces around a note.',
+      'Only row 10, an emoji, is red: "💥 crashed". The demo fails that value on purpose, as a database column that cannot store emoji would; that is what probing is for. The automatic check reads ✖, so "✔ Correct, continue" takes a second click.',
+      `Under the step the panel shows "${browser({ http: 1 })}": that crash. The refused values (HTTP 422) are in the table, not there.`,
+    ]],
+    s15what: `Send the "${A.notes}" form of order 1001 with 11 values. Values the demo accepts are added as notes starting with "${PREFIX}"; the last step deletes them.`,
+    s15yes: '✔ Yes, probe the field',
+    s16: ['Due date field probed', `I sent the "${A.dueDate}" form with 6 values, one at a time.`, [
+      `A table of 6 tries, all as expected. Saved: tomorrow and today. Not sent (the browser): yesterday, empty, and ${noDay}, which is no day. Refused by the demo: ${farDay}, "${A.farDate}"`,
+      'Under the table a note says that the values not sent did not reach the demo\'s own check.',
+    ]],
+    s16what: `Send the "${A.dueDate}" form of order 1001 with 6 values; each value the demo accepts becomes the order's due date.`,
+    s17: [`A double click on "${A.addNote}" adds one note`, `I typed ${PREFIX}9 into "${A.note}" and double-clicked "${A.addNote}".`, [`A green "${A.noteAdded}" message at the top.`, `One new note "${PREFIX}9" in "${A.notes}", not two.`]],
+    s17what: `Double-click "${A.addNote}" with the note ${PREFIX}9. A page that does not guard against it adds two notes.`,
+    s18: ['Probe notes deleted', `I deleted the notes starting with "${PREFIX}" in the demo's data and opened order 1001 again.`, [`"${A.notes}" reads "${A.noNotes}"`, 'The automatic check compares the number deleted with what the probe and the double click saved.']],
+    s18what: `In the demo's data, delete the notes that start with "${PREFIX}": the ones the probe and the double click added. The number deleted is shown.`,
+    s18yes: '✔ Yes, delete them',
     boxTitle: 'Demo API account', email: 'E-mail', password: 'Password',
   },
   tr: {
@@ -65,6 +88,23 @@ const P = {
     s13: ['Çağrılar sipariş sayfasında listeleniyor', `1001 numaralı siparişi yeniledim (sayfa yüklenince kutu boşaldı), kutuyu kaldırdım ve "${A.calls}" kartını işaretledim.`, ['En yeni üstte: login · Refused, check · SMOKE-A · Valid, login · SignedIn.']],
     s14: ['Yardım sayfası', `"${A.help}" ▸ "${A.helpTitle}" sayfasını açtım.`, [`Paragraf "${A.helpDue.split('. ')[0]}." diye başlıyor.`, `Panelde adımın altında "${browser({ js: 1, http: 1 })}" görünüyor: sayfa ipuçlarını GET /api/tips ile yüklüyor, demo bu çağrıyı bilerek düşürüyor. Ekranda hiçbir iz yok.`]],
     s14network: `--network ile panel ayrıca "${profileLeak}" (profil çağrısı bir parola özeti gönderiyor) ve "${settingsTwice}" satırlarını gösteriyor; GET /api/help/stats bitince (yaklaşık 1,5 sn) 🌐 satırı onu en yavaş çağrı olarak gösteriyor.`,
+    s15: ['Not alanı patlatıldı', `1001 numaralı siparişin "${A.notes}" formunu 11 değerle tek tek gönderdim; her değerden önce siparişi yeniden açtım.`, [
+      '11 denemelik bir tablo. Gönderilmedi: boş (tarayıcı). Reddedildi: yalnız boşluk, 101 ve 10.000 karakter. Kaydedildi: 100 karakter, tırnak ve köşeli ayraçlar, script etiketi, bir SQL parçası, Türkçe harfler ve başında sonunda boşluk olan not.',
+      'Yalnız 10. satır, emoji, kırmızı: "💥 çöktü". Demo bu değeri bilerek düşürüyor, emoji saklayamayan bir veritabanı sütunu gibi; patlatma tam bunun için. Otomatik kontrol ✖ diyor, bu yüzden "✔ Doğru, devam" iki tık ister.',
+      `Panelde adımın altında "${browser({ http: 1 })}" görünüyor: o çöküş. Reddedilen değerler (HTTP 422) orada değil, tabloda.`,
+    ]],
+    s15what: `1001 numaralı siparişin "${A.notes}" formunu 11 değerle gönder. Demonun kabul ettiği değerler "${PREFIX}" ile başlayan not olarak eklenir; son adım onları siler.`,
+    s15yes: '✔ Evet, alanı patlat',
+    s16: ['Son tarih alanı patlatıldı', `"${A.dueDate}" formunu 6 değerle tek tek gönderdim.`, [
+      `6 denemelik bir tablo, hepsi beklendiği gibi. Kaydedildi: yarın ve bugün. Gönderilmedi (tarayıcı): dün, boş ve var olmayan bir gün olan ${noDay}. Demo reddetti: ${farDay}, "${A.farDate}"`,
+      'Tablonun altındaki not, gönderilmeyen değerlerin demonun kendi denetimine ulaşmadığını söylüyor.',
+    ]],
+    s16what: `1001 numaralı siparişin "${A.dueDate}" formunu 6 değerle gönder; demonun kabul ettiği her değer siparişin son tarihi olur.`,
+    s17: [`"${A.addNote}" düğmesine çift tıklama tek not ekliyor`, `"${A.note}" alanına ${PREFIX}9 yazdım ve "${A.addNote}" düğmesine çift tıkladım.`, [`Üstte yeşil "${A.noteAdded}" mesajı.`, `"${A.notes}" kartında tek yeni not "${PREFIX}9", iki değil.`]],
+    s17what: `"${A.addNote}" düğmesine ${PREFIX}9 notuyla çift tıkla. Buna karşı korunmayan bir sayfa iki not ekler.`,
+    s18: ['Patlatma notları silindi', `Demonun verisinde "${PREFIX}" ile başlayan notları sildim ve 1001 numaralı siparişi yeniden açtım.`, [`"${A.notes}" kartında "${A.noNotes}" yazıyor.`, 'Otomatik kontrol silinen sayıyı patlatmanın ve çift tıklamanın kaydettikleriyle karşılaştırıyor.']],
+    s18what: `Demonun verisinde "${PREFIX}" ile başlayan notları sil: patlatmanın ve çift tıklamanın ekledikleri. Silinen sayı gösterilir.`,
+    s18yes: '✔ Evet, sil',
     boxTitle: 'Demo API hesabı', email: 'E-posta', password: 'Parola',
   },
 }[lang];
@@ -232,6 +272,90 @@ module.exports = {
         await mark(page.locator('#help-due'));
       },
       check: async ({ page, text }) => [(await text(page.locator('#help-due'))) === A.helpDue, tx('Paragraph found.', 'Paragraf bulundu.'), tx('Paragraph text differs.', 'Paragraf metni farklı.')],
+    },
+    {
+      // Probe steps (--probe): each value with what it expects and where that comes from — the code (the server
+      // allows 100 characters and trims; the field is required), the catalog of references/probing.md, or an
+      // assumption the user agreed to. The demo's own check of the emoji is the bug on purpose.
+      ...step(P.s15),
+      probe: true,
+      approve: { what: P.s15what, yes: P.s15yes },
+      run: async ({ page, goto, mark, probe, state }) => {
+        await goto(`/orders/${demo.ORDER}`);
+        state.notes = await probe({
+          field: page.locator('#note'),
+          submit: page.locator('#add-note'),
+          saved: page.locator('.alert-success', { hasText: A.noteAdded }),
+          message: page.locator('#note-error'),
+          values: [
+            { value: '', expect: 'blocked', from: 'code' },
+            { value: '   ', expect: 'rejected', from: 'code' },
+            { value: at(`${PREFIX}1 `, demo.NOTE_MAX), expect: 'saved', from: 'code' },
+            { value: at(`${PREFIX}2 `, demo.NOTE_MAX + 1), expect: 'rejected', from: 'code' },
+            { value: 'x'.repeat(10000), expect: 'rejected', from: 'catalog' },
+            { value: `${PREFIX}3 ' " < > &`, expect: 'saved', from: 'catalog' },
+            { value: `${PREFIX}4 <script>alert(1)</script>`, expect: 'saved', from: 'catalog' },
+            { value: `${PREFIX}5 ' OR 1=1 --`, expect: 'saved', from: 'catalog' },
+            { value: `${PREFIX}6 İıĞğŞşÇçÖöÜü`, expect: 'saved', from: 'catalog' },
+            { value: `${PREFIX}7 😀`, expect: 'saved', from: 'catalog' },
+            { value: `  ${PREFIX}8  `, expect: 'saved', from: 'assumed' },
+          ],
+        });
+        await mark(page.locator('#notes'));
+      },
+    },
+    {
+      ...step(P.s16),
+      probe: true,
+      approve: { what: P.s16what },
+      run: async ({ page, goto, mark, probe }) => {
+        await goto(`/orders/${demo.ORDER}`);
+        await probe({
+          field: page.locator('#dueDate'),
+          submit: page.locator('#due-form button[type=submit]'),
+          saved: page.locator('.alert-success', { hasText: A.saved }),
+          message: page.locator('.alert-error'),
+          values: [
+            { value: demo.isoDay(1), expect: 'saved', from: 'code' },
+            { value: demo.isoDay(0), expect: 'saved', from: 'code' },
+            { value: demo.isoDay(-1), expect: 'blocked', from: 'code' },
+            { value: '', expect: 'blocked', from: 'code' },
+            { value: noDay, expect: 'blocked', from: 'catalog' },
+            { value: farDay, expect: 'rejected', from: 'code' },
+          ],
+        });
+        await mark(page.locator('#due-form'));
+      },
+    },
+    {
+      // A flow probe: an ordinary step, walked only with --probe, that counts the records it may have added.
+      ...step(P.s17),
+      probe: true,
+      approve: { what: P.s17what },
+      run: async ({ page, goto, mark, state }) => {
+        await goto(`/orders/${demo.ORDER}`);
+        state.notesBefore = demo.db.notes();
+        await page.locator('#note').fill(`${PREFIX}9`);
+        await Promise.all([page.waitForEvent('load'), page.locator('#add-note').dblclick()]);
+        state.double = demo.db.notes() - state.notesBefore;
+        await mark(page.locator('#notes'));
+      },
+      check: async ({ state }) => [state.double === 1, tx('1 note added.', '1 not eklendi.'), tx(`${state.double} notes added (expected 1).`, `${state.double} not eklendi (1 bekleniyordu).`)],
+    },
+    {
+      // The clean-up of the probe: what it saved, by the prefix, checked against the probe's own list.
+      ...step(P.s18),
+      probe: true,
+      approve: { what: P.s18what, yes: P.s18yes },
+      run: async ({ page, goto, mark, state }) => {
+        // Stands in for the project's database tool: a delete limited to the test records, count kept.
+        state.deleted = demo.db.deleteNotes(PREFIX);
+        state.expectedDeleted = ((state.notes && state.notes.saved.length) || 0) + (state.double || 0);
+        await goto(`/orders/${demo.ORDER}`);
+        await mark(page.locator('#notes'));
+      },
+      check: async ({ state }) => [state.deleted === state.expectedDeleted, tx(`${state.deleted} notes deleted.`, `${state.deleted} not silindi.`),
+        tx(`${state.deleted} notes deleted (expected ${state.expectedDeleted}).`, `${state.deleted} not silindi (${state.expectedDeleted} bekleniyordu).`)],
     },
   ],
 };

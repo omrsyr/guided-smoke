@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+- **`--probe`: probing a form the way an experienced tester would.** A step marked `probe: true` sends one form field
+  every value the user approved in the plan, one value at a time, and the panel shows one table of what each led to.
+  - The table has a row per value: the value (shortened, `x×92`), what the plan expected and where that comes from
+    (🔧 the code · 📘 the catalog · ❓ an assumption), what happened, and the application's message.
+  - What happened: 💥 crashed (a 5xx, a script error or a failed request) · 🛑 not sent (the browser's own check, a
+    field that does not take the value, a disabled button) · ⛔ refused (the application's message, or an error status
+    with nothing on the screen) · ✔ saved (✂ when a `maxlength` kept only part of it) · ❔ unclear.
+  - A row that differs from its expectation is red and fails the step's automatic check, so ✔ takes a second click.
+  - Without `--probe` probe steps are skipped ("runs with --probe"), so a plan can keep them. Naming one with `--only`
+    or `--retry-failed` without `--probe` is refused with a clear message.
+- **A probe step is always a permitted step.** It asks first, also without an `approve` of its own, and is off on a
+  remote address unless `--allow-remote-writes` is given. It never goes on by itself under `--auto`. While it runs, the
+  panel shows "Try 3 of 11" with ■ Stop and lets clicks through to the page. A stop keeps the tries before it.
+- **A form is waited for, not its page load.** Each try waits until something happens (an error answer, the browser's
+  refusal, "saved", the application's message) or its timeout runs out. A form that sends with a script and never
+  loads a page is probed like one that posts.
+- **What a probe sends does not turn into noise.** A refused value's 4xx belongs to its try, not to the step's
+  browser errors; a 5xx or a script error is both. Each try counts "the same call" on its own, so a page opened once
+  per try is not a repeated call for `--network`.
+- **The report has a "Probing" section.** Each probe step has a table, with notes: rows not sent did not test the
+  server, and an assumed expectation that differs is doubted first. The summary and the note column count the tries;
+  the paste block lists only the rows that differ, each with the application's message.
+  - A probe step skipped without `--probe` stays out of the comparison with earlier walks and of the paste block.
+- **The application's message is recorded, cut to 120 characters.** It is the only message text a walk keeps, since
+  it answers the plan's own test value. A probe does not run while the value box is open.
+- New `references/probing.md`: when to probe, reading expectations from the code's rules, the catalog of values
+  (text, characters, number, date, e-mail, phone, flow probes such as a double click), test-record prefixes and the
+  clean-up step.
+- The demo has four probe steps (`demo --probe`): the order's notes (at most 100 characters; an emoji fails with 500
+  on purpose), the due date, a double click on "Add note", and the clean-up of what they saved. Without `--probe` the
+  demo walks its 14 steps as before.
+
 ## 1.3.2 — 2026-11-09
 
 - **`--network` no longer reads a translation file's labels as secrets.** In the first walk on a real application, an

@@ -48,7 +48,12 @@ views) so `expect` matches the screen word for word.
 
 ## 4. Show the plan, get approval
 
-In the chat, list the steps as a numbered list: title and one line of what the user will check. Mark permitted steps
+For probe steps (`plan --probe`, or the user asked to probe a form), show first, per field, the table of values with
+their expectations and where each comes from (🔧 code · 📘 catalog · ❓ assumption) and how many come from the code, ask
+at most three questions that change the plan, and write only the approved values into the plan ([probing](probing.md)).
+
+In the chat, list the steps as a numbered list: title and one line of what the user will check. Mark probe steps (they
+run only with `--probe`). Mark permitted steps
 (they will ask again in the browser). Say how many steps there are and roughly how long it takes (about 30 s per step).
 Wait for the user's go-ahead. `guided-smoke plan` stops here.
 
@@ -67,6 +72,9 @@ node <skill-dir>/engine/run.js run <plan-id> --base <url> [--work-item N] [other
   failed, **✔** takes a second click; the report flags such steps. With `--auto`, a step whose check passed goes on by
   itself after a 3 s countdown; **⏸ Wait** or any button keeps it for the user. Suggest `--auto` only for a re-run
   the user already walked once by hand.
+- A plan with probe steps runs them only with `--probe`. Each asks first, then shows its progress ("Try 3 of 11") with a
+  ■ Stop button, and ends with the table: tell the user that red rows differ from what was approved and that ✔ then
+  takes a second click.
 - Suggest `--network` once when the change touches API calls, lists or error handling, or the walk runs on a test
   server: the panel then also shows the 🌐 line and its ⛔/⚠ findings under each step.
 - Do not poll. Wait until the command finishes.

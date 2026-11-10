@@ -32,6 +32,10 @@ listesini okuman, tek başına tıklaman ya da hızla akıp giden bir betiği iz
   tekrarlanan çağrı, yanıtta parola özeti ya da token, adreste gizli değer, hata sayfasında bağlantı dizesi ya da
   stack trace, ekranın belki gerektirmediği kişisel veri gibi bulgular. Rapor, sitenin eksik güvenlik başlıklarını ve
   oturum çerezi bayraklarını da ekler. Kayda yalnız adlar ve sayılar girer, hiçbir değer girmez.
+- `--probe` ile formu deneyimli bir testçi gibi dener: planın patlatma adımları bir alana senin onayladığın sınır ve
+  yanlış değerleri gönderir (boş, çok uzun, özel karakter, var olmayan bir gün, çift tıklama); her değerin beklentisi
+  ve bu beklentinin kaynağı plandadır. Panel her değerin neye yol açtığını tek tabloda gösterir: çöktü, gönderilmedi,
+  reddedildi (uygulamanın mesajıyla), kaydedildi ya da belirsiz. Beklenenden farklı satırlar kırmızıdır.
 - Her cevap anında kaydedilir. **Rapor** geçeni ve farklı olanı, tarayıcının hata bildirdiği adımları, ölçülen koşu
   süresini, her adımın en son cevap aldığı koşudan bu yana neyin değiştiğini ve iş kaydına yapıştırılacak bir bloğu verir.
 - Düzeltmeden sonra `run 6655 --retry-failed` yalnız ✖ işaretli adımları koşar.
@@ -78,7 +82,7 @@ node ~/.claude/skills/guided-smoke/engine/run.js setup     # bir kez: playwright
 node ~/.claude/skills/guided-smoke/engine/run.js demo      # plugin'de: aynı iki komut, plugin'in klasöründe
 ```
 
-127.0.0.1'de küçük bir demo uygulaması açılır ve tarayıcında 14 adımlık bir koşu başlar: sayfada yazan hesapla giriş
+127.0.0.1'de küçük bir demo uygulaması açılır ve tarayıcında 14 adımlık bir koşu başlar (`demo --probe`: 18; iki alan patlatılır, bir çift tıklama ve temizlikleri): sayfada yazan hesapla giriş
 yap, sonra paneli izle (yaklaşık 5 dakika). Her adım türü var: form, tarayıcının engellediği bir doğrulama, indirme,
 pencere, iki izinli adım, arka plan işi, değer kutusuyla API çağrıları ve bilerek düşen bir arka plan çağrısı (panel gösterir; `demo --network` yardım sayfasının diğer çağrılarının ne gönderdiğini ve neye mal olduğunu da gösterir). Makinenden hiçbir şey çıkmaz; demo
 kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin.
@@ -100,7 +104,8 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
 `--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (varsayılan: sistemin dili), `--skip-writes`, `--fresh`,
 `--auto` (kontrolü geçen adım 3 sn sonra kendiliğinden geçer), `--panel left,min` (köşe, küçültülmüş başla),
 `--video`, `--trace` (kayıtlar koşu klasöründe; değer kutusu izin dışında kalır; `--video` için bir kez
-`run.js setup --video`, yaklaşık 4 MB), `--network` (ağın yaptıkları, her adımın altında ve raporda). Ayrıntı:
+`run.js setup --video`, yaklaşık 4 MB), `--network` (ağın yaptıkları, her adımın altında ve raporda), `--probe`
+(planın patlatma adımları: bir form alanına sınır ve yanlış değerler). Ayrıntı:
 [SKILL.md](SKILL.md).
 
 ## Giriş ve veriler
@@ -113,8 +118,9 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
   `~/.local/share/guided-smoke` (Linux) ya da `GUIDED_SMOKE_HOME`.
 - Kayda giren: adım başlıkları, cevapların ve notların, otomatik kontrol metinleri, süreler; tarayıcı hatalarından
   yalnız tür, yöntem, yol (sorgusuz, kimlikler maskeli) ve durum kodu; `--network` ile ayrıca istek sayıları,
-  boyutlar, süreler ve bir bulgunun ilgili olduğu alan, parametre, başlık ve çerez adları. Girmeyen: sayfanın HTML'i,
-  çerezler, form değerleri, kimlik bilgileri, istek/yanıt gövdeleri, hata mesajları, bulunan hiçbir şeyin değeri.
+  boyutlar, süreler ve bir bulgunun ilgili olduğu alan, parametre, başlık ve çerez adları; `--probe` ile her denemenin
+  değeri (kısaltılmış), sonucu ve uygulamanın ona verdiği mesaj (en fazla 120 karakter). Girmeyen: sayfanın HTML'i,
+  çerezler, senin yazdığın değerler, kimlik bilgileri, istek/yanıt gövdeleri, diğer mesajlar, bulunan hiçbir şeyin değeri.
   Ekran görüntüsü yalnız sen istersen.
 
 ![Sol alttaki değer kutusu (İngilizce panel): API hesabını kullanıcı yazdı; kutuda görünen sonuçta e-posta da parola da yok](docs/screenshot-box.png)

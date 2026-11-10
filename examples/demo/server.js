@@ -2,8 +2,10 @@
 // The demo application for `node run.js demo`: a tiny orders site with a sign-in, one order with a due date, an invoice
 // download, the application's own confirm dialog, a client API with an account of its own, a reminder job and a help
 // page whose background calls show what the screen does not: one fails on purpose, one hands out a password hash, one
-// is made three times and one is slow (--network). It listens on 127.0.0.1 only, keeps everything in memory and
-// forgets it when it stops. It exists for the demo plan.
+// is made three times and one is slow (--network). For --probe the order has notes: at most 100 characters, a refused
+// note answers 422 with the page and its message, and a note with an emoji fails with 500 on purpose (as a database
+// column that cannot store it would). It listens on 127.0.0.1 only, keeps everything in memory and forgets it when it
+// stops. It exists for the demo plan.
 
 const http = require('http');
 const crypto = require('crypto');
@@ -18,6 +20,9 @@ const JOB_SECONDS = 3;
 const STATS_MS = 1500;
 // What the profile call gives away. Not a real hash; the tests check that it never reaches a record.
 const PROFILE_HASH = '$2b$10$demoHashNotRealDemoHashNotReal';
+const NOTE_MAX = 100;
+// A due date further away than this is refused by the server (the browser knows only the earliest one).
+const DUE_MAX_DAYS = 5 * 365 + 1;
 
 const pad = n => String(n).padStart(2, '0');
 /** Today plus `offset` days as yyyy-mm-dd, in this machine's time zone (what a date input shows). */
@@ -31,7 +36,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 
 let store = null;
 function reset() {
-  store = { due: null, status: 'open', reminders: 0, calls: [], job: { lastRun: null, running: false }, sessions: new Set(), tokens: new Set() };
+  store = { due: null, status: 'open', reminders: 0, calls: [], notes: [], job: { lastRun: null, running: false }, sessions: new Set(), tokens: new Set() };
 }
 reset();
 
@@ -49,6 +54,13 @@ const db = {
   },
   reminders: () => store.reminders,
   calls: () => store.calls.length,
+  notes: () => store.notes.length,
+  /** Deletes the notes that start with the prefix (the test records of a probe); returns how many. */
+  deleteNotes(prefix) {
+    const before = store.notes.length;
+    store.notes = store.notes.filter(n => !n.startsWith(prefix));
+    return before - store.notes.length;
+  },
 };
 
 const CSS = `
@@ -70,6 +82,7 @@ button,.button{font:inherit;padding:6px 14px;border-radius:4px;border:1px solid 
 .actions{display:flex;gap:8px;margin-top:8px}
 table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:14px}
 .note{color:#065f46;font-weight:600;margin:8px 0 0}.muted{color:#6b7280;font-size:13px}
+.field-error{color:#b91c1c;font-size:13px;margin:4px 0 0}#note{width:320px}#note-list li{overflow-wrap:anywhere}
 #cancel-dialog{border:0;border-radius:8px;padding:0}#cancel-dialog::backdrop{background:rgba(0,0,0,.45)}
 .modal-content{background:#fff;padding:20px 24px;min-width:320px}
 .login{max-width:360px;margin:60px auto}.login input{width:100%;margin:2px 0 10px}
@@ -93,6 +106,9 @@ if (tips) {
   for (let i = 0; i < 3; i++) fetch('/api/settings');
   fetch('/api/help/stats');
 }
+// The note form guards against a double click: its button is off once the form is on its way.
+const noteForm = document.getElementById('note-form');
+if (noteForm) noteForm.addEventListener('submit', e => { if (e.submitter) e.submitter.disabled = true; });
 `;
 
 function page(T, lang, title, body, nav = true) {
@@ -103,9 +119,14 @@ function page(T, lang, title, body, nav = true) {
     + `<main>${body}</main><script src="/app.js"></script></body></html>`;
 }
 
-function orderPage(T, lang, query) {
+// `form`: a refused note, shown again with its message (as a server-rendered form does).
+function orderPage(T, lang, query, form = {}) {
   const alert = query.get('saved') ? `<div class="alert alert-success" role="status">${esc(T.saved)}</div>`
-    : query.get('error') ? `<div class="alert alert-error" role="alert">${esc(T.pastDate)}</div>` : '';
+    : query.get('noted') ? `<div class="alert alert-success" role="status">${esc(T.noteAdded)}</div>`
+      : query.get('error') ? `<div class="alert alert-error" role="alert">${esc(query.get('error') === 'far' ? T.farDate : T.pastDate)}</div>` : '';
+  const notes = store.notes.length
+    ? `<ul id="note-list">${store.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>`
+    : `<p class="muted">${esc(T.noNotes)}</p>`;
   const status = store.status === 'open' ? T.open : T.cancelled;
   const calls = store.calls.length
     ? `<table><thead><tr><th>${esc(T.time)}</th><th>${esc(T.endpoint)}</th><th>${esc(T.machine)}</th><th>${esc(T.result)}</th></tr></thead><tbody>`
@@ -132,6 +153,13 @@ function orderPage(T, lang, query) {
 </section>
 <section class="card" id="api-account"><h2>${esc(T.apiAccount)}</h2><p class="muted">${esc(T.apiHint)}</p></section>
 <section class="card" id="calls"><h2>${esc(T.calls)}</h2>${calls}</section>
+<section class="card" id="notes"><h2>${esc(T.notes)}</h2>${notes}
+  <form class="inline" id="note-form" method="post" action="/orders/${ORDER}/notes">
+    <div><label for="note">${esc(T.note)}</label><input id="note" name="note" required value="${esc(form.note || '')}"></div>
+    <button type="submit" id="add-note">${esc(T.addNote)}</button>
+  </form>
+  ${form.noteError ? `<p class="field-error" id="note-error">${esc(form.noteError)}</p>` : ''}
+</section>
 <dialog id="cancel-dialog"><div class="modal-content">
   <p>${esc(T.confirm)}</p>
   <div class="actions"><button type="button" class="secondary" id="cancel-no">${esc(T.no)}</button>
@@ -253,8 +281,21 @@ ${failed ? `<div class="alert alert-error" role="alert">${esc(T.wrongSignIn)}</d
     if (route === `POST /orders/${ORDER}`) {
       const due = new URLSearchParams(await readBody(req)).get('due') || '';
       if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || due < isoDay(0)) return redirect(`/orders/${ORDER}?error=1`);
+      if (due > isoDay(DUE_MAX_DAYS)) return redirect(`/orders/${ORDER}?error=far`);
       store.due = due;
       return redirect(`/orders/${ORDER}?saved=1`);
+    }
+    if (route === `POST /orders/${ORDER}/notes`) {
+      const note = new URLSearchParams(await readBody(req)).get('note') || '';
+      const text = note.trim();
+      // The demo's bug on purpose: a character outside the basic plane (an emoji) cannot be stored.
+      if (/[\u{10000}-\u{10FFFF}]/u.test(text)) {
+        return send(500, 'text/html; charset=utf-8', page(T, lang, T.serverError, `<section class="card"><h1>${esc(T.serverError)}</h1></section>`));
+      }
+      const refused = !text ? T.noteEmpty : [...text].length > NOTE_MAX ? T.noteLong : null;
+      if (refused) return send(422, 'text/html; charset=utf-8', orderPage(T, lang, url.searchParams, { note, noteError: refused }));
+      store.notes.push(text);
+      return redirect(`/orders/${ORDER}?noted=1`);
     }
     if (route === `POST /orders/${ORDER}/cancel`) { store.status = 'cancelled'; return redirect(`/orders/${ORDER}`); }
     if (route === `GET /orders/${ORDER}/invoice`) {
@@ -294,4 +335,4 @@ function start({ lang = 'en', port = 0 } = {}) {
   });
 }
 
-module.exports = { start, db, isoDay, ORDER, JOB, SIGN_IN, API_ACCOUNT, PROFILE_HASH, STATS_MS };
+module.exports = { start, db, isoDay, ORDER, JOB, SIGN_IN, API_ACCOUNT, PROFILE_HASH, STATS_MS, NOTE_MAX };

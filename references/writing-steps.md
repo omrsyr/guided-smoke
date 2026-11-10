@@ -45,6 +45,7 @@ The step context (`ctx`) offers:
 | `secretBox({ title, fields })` | A box on the page where the user types values a step needs (an API account); `null` removes it |
 | `inPage(fn, arg)` | Run `fn({ fields, arg })` inside the page; the box's values come back masked as `•••`. Waits while a required field is empty |
 | `poll(fn, { until, timeout, interval })` | Call `fn` until `until(value)` holds (default: truthy) or `timeout` ms pass (default 30000, every 1000); returns the last value |
+| `probe({ field, submit, saved, message, values })` | Send one field's form once per value and sort what happened; only in a step marked `probe: true` (rule 18, [probing](probing.md)) |
 | `state` | An object shared by all steps of the walk |
 | `sleep(ms)`, `url(path)`, `log(msg)`, `walkDir` | — |
 
@@ -117,3 +118,8 @@ For an API that needs the user's account, the project's database tool, or a back
     `network.slowMs` (default 1000) sets "slow"; `network.ignore` leaves calls out entirely (patterns matched against
     `GET /path`): a long poll or a streaming hub, never a finding the change under test causes. A step that expects a
     finding says so in `expect`, as for browser errors.
+18. **Probing (`--probe`).** A step marked `probe: true` runs only with `--probe` and always asks first, as a permitted
+    step does (its own `approve` says what it may save; without one the panel says so in general words). Inside it,
+    `probe()` sends one field's form with every value the user approved in the plan, each with its expectation and
+    where that comes from. Put probe steps after the happy path, end with a probe clean-up step, and see
+    [probing](probing.md) for the catalog, the expectations and what a try leads to.

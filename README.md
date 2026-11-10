@@ -32,6 +32,10 @@ checklist, clicking through it alone, or watching a script race past.
   findings such as a slow or repeated call, a password hash or token in an answer, a secret in an address, a
   connection string or stack trace in an error page, or personal data the screen may not need. The report adds the
   site's missing security headers and session cookie flags. Only names and numbers are kept, never a value.
+- With `--probe` it tries a form the way an experienced tester would: the plan's probe steps send one field the
+  boundary and wrong values you approved (empty, too long, special characters, a day that does not exist, a double
+  click), each with its expectation and where that comes from, and the panel shows one table of what each value led
+  to: crashed, not sent, refused (with the application's message), saved or unclear. Rows that differ are red.
 - Every answer is saved at once. The **report** lists what passed and what differed, the steps with browser errors,
   the measured walk time, what changed since each step was last walked, and a block to paste into your work item.
 - After a fix, `run 6655 --retry-failed` runs only the steps marked ✖.
@@ -78,7 +82,7 @@ node ~/.claude/skills/guided-smoke/engine/run.js setup     # once: playwright-co
 node ~/.claude/skills/guided-smoke/engine/run.js demo      # from the plugin: the same two commands in its folder
 ```
 
-A small demo application starts on 127.0.0.1 and a 14-step walk opens in your browser: sign in with the account shown
+A small demo application starts on 127.0.0.1 and a 14-step walk opens in your browser (`demo --probe`: 18, with two probed fields, a double click and their clean-up): sign in with the account shown
 on the page, then follow the panel (about 5 minutes). It covers every kind of step: a form, a validation the browser
 blocks, a download, a dialog, two permitted steps, a background job, API calls through the value box and a background call that fails on purpose (the panel shows it; `demo --network` also shows what the help page's other calls send and cost). Nothing
 leaves your machine, and the demo forgets everything when it stops. In Claude Code you can also say
@@ -101,7 +105,8 @@ Useful flags: `--browser chrome|edge`, `--base https://localhost:5001`, `--pace 
 `--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (default: your system's), `--skip-writes`, `--fresh`,
 `--auto` (a step whose check passed goes on by itself after 3 s), `--panel left,min` (corner, start minimized),
 `--video`, `--trace` (recordings in the walk folder; the value box is left out of the trace; `--video` needs
-`run.js setup --video` once, about 4 MB), `--network` (what the network did, under each step and in the report).
+`run.js setup --video` once, about 4 MB), `--network` (what the network did, under each step and in the report),
+`--probe` (the plan's probe steps: boundary and wrong values for a form field).
 See [SKILL.md](SKILL.md).
 
 ## Sign-in and data
@@ -114,8 +119,10 @@ See [SKILL.md](SKILL.md).
   `~/.local/share/guided-smoke` (Linux), or `GUIDED_SMOKE_HOME`.
 - Recorded: step titles, your answers and notes, automatic-check texts, times, and of browser errors only the kind,
   method, path (no query, ids masked) and status; with `--network` also request counts, sizes, times and the names
-  of the fields, parameters, headers and cookies a finding is about. Never: page HTML, cookies, form values,
-  credentials, request or response bodies, error messages, the value of anything found. Screenshots only when you ask.
+  of the fields, parameters, headers and cookies a finding is about; with `--probe` each try's value (shortened),
+  what happened and the application's message to it (at most 120 characters). Never: page HTML, cookies, values you
+  type, credentials, request or response bodies, other messages, the value of anything found. Screenshots only when
+  you ask.
 
 ![The value box at the bottom left: the user typed the API account; the result shown in the box carries no e-mail or password](docs/screenshot-box.png)
 

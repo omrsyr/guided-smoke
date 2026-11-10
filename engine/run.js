@@ -42,12 +42,12 @@ const FLAGS = {
     browser: 'value', base: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool',
     'skip-writes': 'bool', 'allow-remote-writes': 'bool', 'work-item': 'value', fresh: 'bool', screens: 'value',
     locale: 'value', lang: 'value', 'keep-downloads': 'bool', force: 'bool', auto: 'bool', trace: 'bool', video: 'bool',
-    panel: 'value', network: 'bool',
+    panel: 'value', network: 'bool', probe: 'bool',
   },
   demo: {
     browser: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool', 'skip-writes': 'bool',
     fresh: 'bool', screens: 'value', locale: 'value', lang: 'value', 'keep-downloads': 'bool', auto: 'bool', trace: 'bool',
-    video: 'bool', panel: 'value', network: 'bool',
+    video: 'bool', panel: 'value', network: 'bool', probe: 'bool',
   },
   list: {},
   report: {},
@@ -147,7 +147,8 @@ function loadPlan(file) {
     if (!s || !s.title) throw new UsageError(`${file}: step ${i + 1} has no title.`);
     if (typeof s.run !== 'function') throw new UsageError(`${file}: step ${i + 1} ("${s.title}") has no run function.`);
     if (s.check && typeof s.check !== 'function') throw new UsageError(`${file}: step ${i + 1} check must be a function.`);
-    if (s.skipTo && !s.approve) throw new UsageError(`${file}: step ${i + 1} uses skipTo without approve.`);
+    if (s.probe !== undefined && typeof s.probe !== 'boolean') throw new UsageError(`${file}: step ${i + 1} probe must be true or false.`);
+    if (s.skipTo && !s.approve && !s.probe) throw new UsageError(`${file}: step ${i + 1} uses skipTo without approve.`);
   });
   try { compileIgnore(plan.ignoreErrors); compileConfig(plan.network); } catch (e) { throw new UsageError(`${file}: ${e.message}`); }
   return plan;
@@ -200,10 +201,10 @@ function writeReport(project, planId, walkId) {
     const m = store.readJson(path.join(store.walkDir(project, id), 'walk.json'));
     return m && { meta: m, events: store.readEvents(project, id) };
   }).filter(Boolean);
-  const { markdown, counts, against, errorSteps, networkSteps } = report.build(meta, store.readEvents(project, walkId), earlier.length ? earlier : null);
+  const { markdown, counts, against, errorSteps, networkSteps, probeSteps } = report.build(meta, store.readEvents(project, walkId), earlier.length ? earlier : null);
   const file = path.join(dir, 'report.md');
   fs.writeFileSync(file, markdown);
-  return { file, markdown, counts, against, errorSteps, networkSteps, meta };
+  return { file, markdown, counts, against, errorSteps, networkSteps, probeSteps, meta };
 }
 
 async function main() {
@@ -379,6 +380,11 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
     allowed = new Set(failed);
     filterNote = `--retry-failed ${src}: ${failed.join(',')}`;
   }
+  // A probe step named on purpose (--only, --retry-failed) would only be skipped without --probe: say so instead.
+  if (allowed && !flags.from && !flags.probe) {
+    const probes = [...allowed].filter(n => plan.steps[n - 1].probe).sort((a, b) => a - b);
+    if (probes.length) throw new UsageError(`Step${probes.length > 1 ? 's' : ''} ${probes.join(', ')} ${probes.length > 1 ? 'are probe steps' : 'is a probe step'}: add --probe to run ${probes.length > 1 ? 'them' : 'it'}.`);
+  }
 
   if (flags.pace && !['slow', 'normal', 'fast'].includes(flags.pace)) throw new UsageError('--pace must be slow, normal or fast.');
   if (flags.screens && !['diff', 'all'].includes(flags.screens)) throw new UsageError('--screens must be diff or all (leave it out for none).');
@@ -411,7 +417,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
         fresh: !!flags.fresh, screens: flags.screens || null, locale: flags.locale || plan.locale || systemLocale(),
         lang: pickLanguage(flags.lang || plan.lang), keepDownloads: !!flags['keep-downloads'],
         auto: !!flags.auto, trace: !!flags.trace, video: !!flags.video, panel,
-        network: flags.network ? compileConfig(plan.network) : null,
+        network: flags.network ? compileConfig(plan.network) : null, probe: !!flags.probe,
       },
     });
   } catch (e) {
@@ -424,7 +430,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
   }
   const r = writeReport(project, planId, walkId);
   console.log(`report: ${r.file}`);
-  console.log(`result: ${r.meta.result} · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}${r.against.length ? ` · ⚠ passed over a failed check: ${r.against.join(', ')}` : ''}${r.errorSteps.length ? ` · ⚠ browser errors in steps: ${r.errorSteps.join(', ')}` : ''}${r.networkSteps.length ? ` · ⚠ network findings in steps: ${r.networkSteps.join(', ')}` : ''}`);
+  console.log(`result: ${r.meta.result} · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}${r.against.length ? ` · ⚠ passed over a failed check: ${r.against.join(', ')}` : ''}${r.errorSteps.length ? ` · ⚠ browser errors in steps: ${r.errorSteps.join(', ')}` : ''}${r.networkSteps.length ? ` · ⚠ network findings in steps: ${r.networkSteps.join(', ')}` : ''}${r.probeSteps.length ? ` · ⚠ probe rows different in steps: ${r.probeSteps.join(', ')}` : ''}`);
   return EXIT.ok;
 }
 

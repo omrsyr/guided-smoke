@@ -7,8 +7,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { texts, format } = require('./i18n');
-const { Bucket, fromConsole, fromPageError, fromResponse, fromFailed, compileIgnore, total: errorTotal } = require('./errors');
+const { Bucket, fromConsole, fromPageError, fromResponse, fromFailed, compileIgnore, total: errorTotal, ABORTED } = require('./errors');
 const { Network, findingTotal } = require('./network');
+const probing = require('./probe');
 
 const PACE = { slow: 400, normal: 200, fast: 60 };
 const DEFAULT_LOGIN = /(login|signin|sign-in|giris|auth|account\/)/i;
@@ -71,7 +72,8 @@ function installUiHost() {
 // s.side puts it at the bottom left or right; s.min starts it minimized; s.countdown (--auto) answers ✔ by itself when
 // the time is up, unless the user presses any button first. s.errors is what the browser reported during the step,
 // s.network (--network) what the network did; what arrives later is shown at once (updateErrors). A browser error or
-// a critical network finding stops the countdown.
+// a critical network finding stops the countdown. s.table (a probe) is a table of tries, its differing rows in red, in
+// a wider panel. s.passThrough (while a probe runs) lets clicks through the panel to the page, except on its buttons.
 function drawPanel(s) {
   const old = document.getElementById('__guided_smoke');
   if (old) old.remove();
@@ -82,7 +84,8 @@ function drawPanel(s) {
     return e;
   };
   const box = el('div', null, {
-    position: 'fixed', ...(s.side === 'left' ? { left: '16px' } : { right: '16px' }), bottom: '16px', width: '460px', maxHeight: '75vh', overflow: 'auto',
+    position: 'fixed', ...(s.side === 'left' ? { left: '16px' } : { right: '16px' }), bottom: '16px', width: s.table ? '640px' : '460px',
+    maxWidth: 'calc(100vw - 32px)', boxSizing: 'border-box', maxHeight: s.table ? '88vh' : '75vh', overflow: 'auto', pointerEvents: s.passThrough ? 'none' : 'auto',
     zIndex: '2147483647', background: '#fff', border: '1px solid #ced4da', borderLeft: `6px solid ${s.accent}`,
     borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,.25)', font: '14px/1.5 "Segoe UI", system-ui, sans-serif',
     color: '#212529', padding: '12px 14px', textAlign: 'left',
@@ -90,7 +93,7 @@ function drawPanel(s) {
   box.id = '__guided_smoke';
   const head = el('div', null, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#6c757d' });
   head.appendChild(el('span', s.header));
-  const min = el('button', s.t.minimize, { border: '1px solid #ced4da', background: '#f8f9fa', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', color: '#212529' });
+  const min = el('button', s.t.minimize, { border: '1px solid #ced4da', background: '#f8f9fa', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', color: '#212529', pointerEvents: 'auto' });
   min.setAttribute('data-guided-smoke-min', '');
   head.appendChild(min);
   box.appendChild(head);
@@ -109,6 +112,26 @@ function drawPanel(s) {
   if (s.auto) {
     body.appendChild(el('div', (s.auto.ok ? s.t.autoOk : s.t.autoFail) + s.auto.text,
       { marginTop: '8px', fontWeight: '600', color: s.auto.ok ? '#198754' : '#dc3545' }));
+  }
+  if (s.table) {
+    const table = el('table', null, { borderCollapse: 'collapse', width: '100%', marginTop: '8px', font: '12px/1.35 "Segoe UI", system-ui, sans-serif' });
+    table.setAttribute('data-guided-smoke-probe', '');
+    const head = el('tr');
+    s.table.head.forEach(h => head.appendChild(el('th', h, { textAlign: 'left', padding: '3px 4px', borderBottom: '1px solid #ced4da', color: '#495057' })));
+    table.appendChild(head);
+    s.table.rows.forEach(r => {
+      const tr = el('tr', null, r.bad ? { background: '#fdecee', color: '#b02a37', fontWeight: '600' } : null);
+      if (r.bad) tr.setAttribute('data-guided-smoke-bad', '');
+      // The number, a short value (a date) and the expectation stay on one line; a long value and the texts wrap.
+      r.cells.forEach((c, i) => tr.appendChild(el('td', c, {
+        padding: '3px 4px', borderBottom: '1px solid #e9ecef', verticalAlign: 'top',
+        ...(i === 0 || i === 2 || (i === 1 && c.length <= 24) ? { whiteSpace: 'nowrap' } : { overflowWrap: 'anywhere' }),
+        ...(i === 1 ? { fontFamily: 'Consolas, monospace' } : {}),
+      })));
+      table.appendChild(tr);
+    });
+    body.appendChild(table);
+    [s.table.legend, ...(s.table.notes || [])].filter(Boolean).forEach(n => body.appendChild(el('div', n, { marginTop: '4px', fontSize: '12px', color: '#6c757d' })));
   }
   (s.warnings || []).forEach(w => body.appendChild(el('div', w, { marginTop: '8px', fontWeight: '600', color: '#b35c00' })));
   const errs = el('div');
@@ -142,7 +165,7 @@ function drawPanel(s) {
   });
   (s.buttons || []).forEach(b => {
     const btn = el('button', b.label, {
-      background: b.color, color: '#fff', border: '0', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer', fontWeight: '600',
+      background: b.color, color: '#fff', border: '0', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer', fontWeight: '600', pointerEvents: 'auto',
     });
     btn.setAttribute('data-guided-smoke-answer', b.value);
     btn.onclick = () => {
@@ -340,6 +363,26 @@ function emptyFields(required) {
   }).map(f => f.label);
 }
 
+// Runs in the page. Takes the panel off the page (the box stays).
+function removePanel() {
+  if (window.__guidedSmokeUi) window.__guidedSmokeUi.hide('panel');
+  const p = document.getElementById('__guided_smoke');
+  if (p) p.remove();
+}
+
+// Runs in the page, on a probe's field, just before its form is sent. The browser fires "invalid" at every field it
+// refuses to send: this field (its own message kept) or another one of the form. A page load forgets it.
+function listenInvalid(field) {
+  const seen = { self: null, other: false };
+  window.__guidedSmokeInvalid = seen;
+  if (window.__guidedSmokeInvalidOn) document.removeEventListener('invalid', window.__guidedSmokeInvalidOn, true);
+  window.__guidedSmokeInvalidOn = e => {
+    if (e.target === field) seen.self = field.validationMessage || ' ';
+    else seen.other = true;
+  };
+  document.addEventListener('invalid', window.__guidedSmokeInvalidOn, true);
+}
+
 /**
  * Replaces every occurrence of the given values in the strings, keys and numbers of a value with "•••": as typed,
  * JSON-escaped, URL-encoded, form-encoded and base64, and every pair as base64 "a:b" (Basic authentication). Anything
@@ -504,7 +547,7 @@ function firstLine(error) {
  * @param {object} o.playwright playwright-core
  * @param {object} o.options    { browser, base, pace, allowed:Set|null, filterNote, skipWrites, allowRemoteWrites, workItem,
  *                                fresh, screens:'diff'|'all'|null, locale, lang, keepDownloads, auto, trace, video,
- *                                panel: { side:'left'|'right', min }, network: compileConfig(plan.network)|null }
+ *                                panel: { side:'left'|'right', min }, network: compileConfig(plan.network)|null, probe }
  */
 async function walk(o) {
   const { plan, planId, walkId, project, walkDir, playwright, options } = o;
@@ -518,7 +561,7 @@ async function walk(o) {
   const screensDir = path.join(walkDir, 'screens');
   const downloadsDir = path.join(walkDir, 'downloads');
   const videoDir = path.join(walkDir, 'video');
-  const counts = { pass: 0, diff: 0, skip: 0, against: 0, auto: 0, errorSteps: 0, networkSteps: 0, networkCritical: 0 };
+  const counts = { pass: 0, diff: 0, skip: 0, against: 0, auto: 0, errorSteps: 0, networkSteps: 0, networkCritical: 0, probeSteps: 0, probeTries: 0, probeDiff: 0 };
   // What the browser reports during a step: collected from the previous answered step to this step's answer. The
   // network (--network) over the same window.
   const seen = new Bucket(compileIgnore(plan.ignoreErrors));
@@ -532,7 +575,7 @@ async function walk(o) {
     base, remote, browser: options.browser.name, browserSource: options.browser.source, lang: options.lang,
     locale: options.locale || null, pace: options.pace, fresh: !!options.fresh, screens: options.screens || null,
     filter: options.filterNote || null, skipWrites: !!options.skipWrites, allowRemoteWrites: !!options.allowRemoteWrites,
-    auto: !!options.auto, trace: !!options.trace, video: !!options.video, traces: [], videos: [],
+    auto: !!options.auto, trace: !!options.trace, video: !!options.video, probe: !!options.probe, traces: [], videos: [],
     totalSteps: total, titles: steps.map(s => s.title), startedAt: new Date().toISOString(), readyAt: null, endedAt: null,
     measuredSeconds: null, result: 'running', ...(net ? { network: net.summary() } : {}),
   };
@@ -553,7 +596,13 @@ async function walk(o) {
     const network = findingTotal(event.network);
     if (network) counts.networkSteps++;
     if (event.network && event.network.critical) counts.networkCritical++;
-    console.log(`[${event.n}] ${event.answer}${event.reason ? ' (' + event.reason + ')' : ''}${event.note ? ' — ' + event.note : ''}${browserErrors ? ` · browser errors: ${browserErrors}` : ''}${network ? ` · network findings: ${network}${event.network.critical ? ` (critical: ${event.network.critical})` : ''}` : ''}`);
+    const probe = event.probe;
+    if (probe && (event.answer === 'pass' || event.answer === 'diff')) {
+      counts.probeSteps++;
+      counts.probeTries += probe.tries;
+      counts.probeDiff += probe.different;
+    }
+    console.log(`[${event.n}] ${event.answer}${event.reason ? ' (' + event.reason + ')' : ''}${event.note ? ' — ' + event.note : ''}${browserErrors ? ` · browser errors: ${browserErrors}` : ''}${network ? ` · network findings: ${network}${event.network.critical ? ` (critical: ${event.network.critical})` : ''}` : ''}${probe ? ` · probe: ${probe.tries - probe.different}/${probe.tries} as expected` : ''}`);
   };
 
   const profile = options.fresh ? fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-')) : o.profile;
@@ -813,11 +862,7 @@ async function walk(o) {
     boxReady = null;
     current = null;
     if (box) box.waiting = false;
-    await page.evaluate(() => {
-      if (window.__guidedSmokeUi) window.__guidedSmokeUi.hide('panel');
-      const p = document.getElementById('__guided_smoke');
-      if (p) p.remove();
-    }).catch(() => {});
+    await page.evaluate(removePanel).catch(() => {});
     await page.evaluate(setBoxWaiting, false).catch(() => {});
     if (res.a === 'stop') {
       // Stop means stop, even for a plan that catches the error and goes on: from here the page sends no request and
@@ -851,6 +896,130 @@ async function walk(o) {
     return out ? out.result : undefined;
   };
 
+  // ---- probing (--probe): one field of a form, many values ----
+  // A try runs from filling the field to the first outcome seen: an error answer of the application, the browser
+  // refusing to send, "saved", the application's message, or nothing within the probe's timeout. While a try runs, the
+  // listeners below give its own answers to `attempt`: an error status (4xx) belongs to the try, not to the step's
+  // browser errors (a refused value is the point); a 5xx, a script error or a failed request makes the try "crashed"
+  // and is a browser error of the step as well. Only the application's own pages and calls count.
+  let attempt = null;
+  let probeStop = null;
+  const baseHost = (() => { try { return new URL(base).hostname; } catch { return null; } })();
+  const ownCall = r => {
+    try { return ['document', 'fetch', 'xhr'].includes(r.resourceType()) && new URL(r.url()).hostname === baseHost; } catch { return false; }
+  };
+  const seenText = async locator => {
+    if (!locator) return '';
+    try {
+      const idx = await locator.evaluateAll(seenIndices);
+      return idx.length ? squash(await locator.nth(idx[0]).textContent({ timeout: 1000 })) : '';
+    } catch { return ''; }
+  };
+  const isSaved = async o => {
+    try {
+      if (typeof o.saved === 'function') return !!(await o.saved(ctx));
+      return (await o.saved.evaluateAll(seenIndices)).length > 0;
+    } catch { return false; }
+  };
+  const tryValue = async (o, v, n) => {
+    attempt = { crash: null, status: null, statusAt: 0 };
+    const op = { timeout: 5000 };
+    let changed;
+    const out = await (async () => {
+      try {
+        await o.field.fill(v.value, op);
+      } catch (e) {
+        // A date that is no day, text in a number field: the field itself does not take it.
+        if (/Malformed value|Cannot type text into|cannot be filled/i.test(String(e && e.message))) return { got: 'blocked', why: 'refused' };
+        throw e;
+      }
+      // A maxlength keeps only part of what was typed; the rest of the try is about what is left.
+      const kept = await o.field.inputValue(op).catch(() => null);
+      if (kept != null && kept !== v.value) changed = { typed: [...v.value].length, kept: [...kept].length };
+      // What a user does on the way to the button; a check on leaving the field shows its message now.
+      await o.field.evaluate(e => e.blur()).catch(() => {});
+      if (await isSaved(o)) return { got: 'unclear', why: 'early' };
+      const before = await seenText(o.message);
+      if (!(await o.submit.isEnabled(op))) return { got: 'blocked', why: 'disabled', message: before };
+      await o.field.evaluate(listenInvalid).catch(() => {});
+      const sentAt = Date.now();
+      await o.submit.click(op);
+      for (;;) {
+        if (probeStop || closed) return null;
+        if (attempt.crash) return { got: 'crashed', ...attempt.crash };
+        const invalid = await page.evaluate(() => window.__guidedSmokeInvalid || null).catch(() => null);
+        if (invalid && invalid.self) return { got: 'blocked', why: 'validity', message: invalid.self.trim() };
+        if (invalid && invalid.other) return { got: 'unclear', why: 'other' };
+        if (await isSaved(o)) return { got: 'saved' };
+        // A message already shown before sending counts once the application has had a moment to save instead.
+        const message = await seenText(o.message);
+        if (message && (message !== before || Date.now() - sentAt >= 1000)) return { got: 'rejected', message, status: attempt.status || undefined };
+        // An error answer and nothing on the screen: refused without a word, once the screen has had a moment.
+        const late = Date.now() - sentAt >= o.timeout;
+        if (attempt.status && (late || Date.now() - attempt.statusAt >= probing.AFTER_ERROR_MS)) return { got: 'rejected', why: 'http', status: attempt.status };
+        if (late) return { got: 'unclear', why: 'timeout', waited: Math.round(o.timeout / 1000) };
+        await new Promise(r => setTimeout(r, 150));
+      }
+    })().catch(e => (probeStop || closed || stopRequested ? null : { got: 'unclear', why: 'error', message: firstLine(e) }));
+    attempt = null;
+    return out && probing.row(n, v, { ...out, changed });
+  };
+  const probe = async spec => {
+    if (!currentStep || !currentStep.probe) throw new Error('probe() runs only in a step marked probe: true (such a step runs with --probe and asks first).');
+    if (currentStep.probed) throw new Error('probe() runs once per step: give each field a step of its own.');
+    if (box) throw new Error('probe() does not run while the value box is open: remove it first with secretBox(null).');
+    const o = probing.checkSpec(spec, t);
+    for (const [name, locator] of [['field', o.field], ['submit', o.submit]]) {
+      await locator.first().waitFor({ state: 'visible', timeout: 5000 }).catch(() => { throw new Error(`probe: the ${name} is not on the page.`); });
+      const count = await locator.count();
+      if (count !== 1) throw new Error(`probe: ${name} must match one element; it matches ${count}.`);
+    }
+    // Before every value but the first the form is brought back: by the plan's reset, else by opening again the
+    // address the probe started on (not a reload: after a save that address may carry "saved").
+    const startUrl = page.url();
+    const reset = async () => {
+      if (o.reset) return o.reset(ctx);
+      await page.goto(startUrl);
+      await page.waitForLoadState('load');
+    };
+    const rows = [];
+    const panel = {
+      header: format(t.step, { n: currentStep.n, total }), accent: COLORS.info, t, didLabel: t.did, expectLabel: t.probeLast,
+      title: currentStep.title, did: '', expect: [t.probeNone], shot: false, passThrough: true,
+      buttons: [{ label: t.stop, value: 'stop', color: COLORS.stop }],
+    };
+    probeStop = null;
+    pending = res => { probeStop = res; };
+    current = panel;
+    try {
+      for (let i = 0; i < o.values.length && !probeStop && !closed; i++) {
+        const v = o.values[i];
+        if (net) net.restartRepeats();
+        if (i > 0) await reset();
+        if (probeStop || closed) break;
+        panel.did = format(t.probeTry, { i: i + 1, n: o.values.length, value: v.label });
+        await draw(panel);
+        const r = await tryValue(o, v, i + 1);
+        if (!r) break;
+        rows.push(r);
+        panel.expect = [`${v.label}: ${probing.gotText(r, t)}`];
+      }
+    } finally {
+      pending = null;
+      current = null;
+      await page.evaluate(removePanel).catch(() => {});
+    }
+    currentStep.probed = probing.verdict(rows);
+    if (probeStop || closed) {
+      // Stop during a probe: the try under way is dropped, the ones before it are kept.
+      stopRequested = probeStop || { a: 'stop', note: 'browser closed' };
+      await context.route('**/*', route => route.abort()).catch(() => {});
+      throw new Error(STOPPED);
+    }
+    // What the plan's clean-up needs: the values the application saved, as sent.
+    return { ...currentStep.probed, saved: rows.filter(r => r.got === 'saved').map(r => o.values[r.n - 1].value) };
+  };
+
   // ---- what the browser reports that the screen does not show ----
   // Off during the sign-in (the user's own pages), after the last step and once Stop has cut the page off. A request
   // sent while the value box is drawn, and any message logged meanwhile, are kept without address or text.
@@ -877,11 +1046,24 @@ async function walk(o) {
     context.on('requestfailed', r => { if (looking()) net.failed(r, !!box || boxRequests.has(r)); });
   }
   context.on('console', m => saw(fromConsole({ type: m.type(), text: m.text(), location: m.location() }, base, !!box)));
-  context.on('weberror', w => saw(fromPageError(w.error(), base, !!box)));
-  context.on('response', r => {
-    if (r.status() >= 400) saw(fromResponse({ method: r.request().method(), url: r.url(), status: r.status() }, base, !!box || boxRequests.has(r.request())));
+  context.on('weberror', w => {
+    if (attempt && looking()) attempt.crash = attempt.crash || { why: 'js' };
+    saw(fromPageError(w.error(), base, !!box));
   });
-  context.on('requestfailed', r => saw(fromFailed({ method: r.method(), url: r.url(), errorText: (r.failure() || {}).errorText }, base, !!box || boxRequests.has(r))));
+  context.on('response', r => {
+    const status = r.status();
+    if (status < 400) return;
+    if (attempt && looking() && ownCall(r.request())) {
+      if (status < 500) { attempt.status = status; attempt.statusAt = Date.now(); return; }
+      attempt.crash = attempt.crash || { why: 'server', status };
+    }
+    saw(fromResponse({ method: r.request().method(), url: r.url(), status }, base, !!box || boxRequests.has(r.request())));
+  });
+  context.on('requestfailed', r => {
+    const errorText = (r.failure() || {}).errorText;
+    if (attempt && looking() && errorText && errorText !== ABORTED && ownCall(r)) attempt.crash = attempt.crash || { why: 'failed' };
+    saw(fromFailed({ method: r.method(), url: r.url(), errorText }, base, !!box || boxRequests.has(r)));
+  });
   // The step's network record: waits up to a second for bodies still being read.
   const takeNetwork = async () => (net ? net.take() : undefined);
 
@@ -893,6 +1075,7 @@ async function walk(o) {
     text,
     secretBox,
     inPage,
+    probe,
     poll: (fn, opts) => poll(fn, opts, async ms => {
       if (closed) throw new Error('browser closed');
       await new Promise(r => setTimeout(r, ms));
@@ -915,7 +1098,7 @@ async function walk(o) {
     sleep: ms => page.waitForTimeout(ms),
     log: message => console.log(String(message)),
   };
-  for (const name of ['goto', 'mark', 'text', 'secretBox', 'inPage', 'poll', 'visible', 'count', 'submit', 'download', 'sleep']) {
+  for (const name of ['goto', 'mark', 'text', 'secretBox', 'inPage', 'probe', 'poll', 'visible', 'count', 'submit', 'download', 'sleep']) {
     const helper = ctx[name];
     ctx[name] = async (...args) => {
       if (stopRequested) throw new Error(STOPPED);
@@ -969,14 +1152,17 @@ async function walk(o) {
       const s = steps[i];
       if (n < skipUntil) { record({ n, title: s.title, answer: 'skip', reason: 'follows-skip' }); continue; }
       if (options.allowed && !options.allowed.has(n)) { record({ n, title: s.title, answer: 'skip', reason: 'filter' }); continue; }
+      // A probe step runs only when asked for (--probe), and it always asks first: it may save what it sends.
+      if (s.probe && !options.probe) { record({ n, title: s.title, answer: 'skip', reason: 'probe' }); continue; }
+      const approve = s.approve || (s.probe ? { what: t.probeWhat } : null);
       shotIndex = n;
       lastShot = null;
       markMissing = false;
       marked = false;
       warnings = [];
 
-      if (s.approve) {
-        const what = typeof s.approve === 'string' ? s.approve : s.approve.what;
+      if (approve) {
+        const what = typeof approve === 'string' ? approve : approve.what;
         const reason = options.skipWrites ? 'skip-writes' : (remote && !options.allowRemoteWrites ? 'remote' : null);
         let decision = reason ? 'skip' : null;
         if (!decision) {
@@ -984,7 +1170,7 @@ async function walk(o) {
             accent: COLORS.warn, title: `${t.approveTitle}: ${s.title}`, did: t.approveIntro, expect: [what], shot: false,
             expectLabel: t.change,
             buttons: [
-              { label: (s.approve && s.approve.yes) || t.approveYes, value: 'approved', color: COLORS.yes },
+              { label: approve.yes || t.approveYes, value: 'approved', color: COLORS.yes },
               { label: t.approveSkip, value: 'skip', color: COLORS.skip },
               { label: t.stop, value: 'stop', color: COLORS.stop },
             ],
@@ -1000,7 +1186,7 @@ async function walk(o) {
         }
       }
 
-      currentStep = { n, title: s.title };
+      currentStep = { n, title: s.title, probe: !!s.probe, probed: null };
       stopRequested = null;
       let runError = null;
       try { await s.run(ctx); } catch (e) { runError = e; }
@@ -1009,20 +1195,28 @@ async function walk(o) {
       else if (s.check && !stopRequested) {
         try { auto = normalizeCheck(await s.check(ctx), t); } catch (e) { auto = { ok: false, text: firstLine(e) }; }
       }
+      // A probe is an automatic check of its own, next to the plan's.
+      const probed = currentStep.probed;
+      if (probed && !runError) {
+        const p = probing.check(probed, t);
+        auto = auto ? { ok: auto.ok && p.ok, text: [p.text, auto.text].filter(Boolean).join(' · ') } : p;
+      }
       // Stop pressed while the step waited for the box: checked here too, in case the plan caught the error itself.
       if (stopRequested) {
-        record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: 'stop', note: stopRequested.note || undefined, browserErrors: seen.take(), network: await takeNetwork() });
+        record({ n, title: s.title, kind: approve ? 'approve' : 'step', answer: 'stop', note: stopRequested.note || undefined, probe: probing.record(probed), browserErrors: seen.take(), network: await takeNetwork() });
         stopped = true;
         break;
       }
       if (options.screens === 'all') { try { lastShot = await takeShot(n); } catch { /* keep going */ } }
 
       // --auto: only a step whose automatic check passed without plan warnings, browser errors or critical network
-      // findings goes on by itself, after a countdown. Network warnings do not hold it.
-      const countdown = options.auto && auto && auto.ok && !warnings.length && !seen.total() && !(net && net.critical())
+      // findings goes on by itself, after a countdown. Network warnings do not hold it. A probe step never does: its
+      // table is there to be read.
+      const countdown = options.auto && !s.probe && auto && auto.ok && !warnings.length && !seen.total() && !(net && net.critical())
         ? { seconds: AUTO_SECONDS, text: t.autoIn, hold: t.autoHold } : undefined;
       const res = await ask(panelFor(n, s, {
         auto,
+        table: probed ? probing.table(probed, t) : undefined,
         warnings,
         countdown,
         errorsLive: true,
@@ -1034,8 +1228,8 @@ async function walk(o) {
         ],
       }));
       if (res.a === 'diff' && options.screens === 'diff' && !lastShot) { try { lastShot = await takeShot(n); } catch { /* keep going */ } }
-      record({ n, title: s.title, kind: s.approve ? 'approve' : 'step', answer: res.a, note: res.note || undefined,
-        auto: auto || undefined, againstCheck: (res.a === 'pass' && auto && !auto.ok) || undefined, error: runError ? firstLine(runError) : undefined, markMissing: markMissing || undefined,
+      record({ n, title: s.title, kind: approve ? 'approve' : 'step', answer: res.a, note: res.note || undefined,
+        auto: auto || undefined, probe: probing.record(probed), againstCheck: (res.a === 'pass' && auto && !auto.ok) || undefined, error: runError ? firstLine(runError) : undefined, markMissing: markMissing || undefined,
         warnings: warnings.length ? warnings : undefined, answeredBy: res.by, seconds: res.seconds, screenshot: lastShot || undefined,
         browserErrors: seen.take(), network: await takeNetwork() });
       if (res.a === 'stop') { stopped = true; break; }
@@ -1055,7 +1249,8 @@ async function walk(o) {
       title: t.doneTitle, did: t.doneDid, shot: false,
       expect: [format(t.doneSummary, counts), ...(counts.auto ? [format(t.doneAuto, counts)] : []),
         ...(counts.against ? [format(t.doneAgainst, counts)] : []), ...(counts.errorSteps ? [format(t.doneErrors, counts)] : []),
-        ...(counts.networkCritical ? [format(t.doneNetworkCritical, counts)] : counts.networkSteps ? [format(t.doneNetwork, counts)] : [])],
+        ...(counts.networkCritical ? [format(t.doneNetworkCritical, counts)] : counts.networkSteps ? [format(t.doneNetwork, counts)] : []),
+        ...(counts.probeTries ? [format(t.doneProbe, counts)] : [])],
       buttons: [
         { label: t.close, value: 'close', color: COLORS.info },
         ...(options.fresh ? [] : [{ label: t.signOut, value: 'signout', color: COLORS.stop }]),

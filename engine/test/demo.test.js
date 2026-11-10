@@ -75,8 +75,11 @@ for (const [lang, boxLate, withNetwork] of [['en', false, true], ['tr', true, fa
         } : undefined,
       });
       assert.strictEqual(meta.result, 'completed');
-      const steps = readEvents(walkDir).filter(e => e.kind === 'step' || (e.kind === 'approve' && e.answer !== 'approved'));
-      assert.strictEqual(steps.length, plan.steps.length);
+      const events = readEvents(walkDir);
+      const steps = events.filter(e => e.kind === 'step' || (e.kind === 'approve' && e.answer !== 'approved'));
+      // Without --probe the probe steps are skipped, never asked.
+      assert.deepStrictEqual(events.filter(e => e.reason === 'probe').map(e => e.n), plan.steps.map((s, i) => s.probe && i + 1).filter(Boolean));
+      assert.strictEqual(steps.length, plan.steps.filter(s => !s.probe).length);
       for (const e of steps) {
         assert.strictEqual(e.answer, 'pass', `${e.n}. ${e.title}`);
         if (e.auto) assert.ok(e.auto.ok, `${e.n}. ${e.title}: ${e.auto.text}`);
@@ -129,6 +132,185 @@ for (const [lang, boxLate, withNetwork] of [['en', false, true], ['tr', true, fa
     }
   });
 }
+
+test('--probe: the demo\'s probe steps sort every try, keep refused values out of the browser errors and repeated calls, never go on by themselves, and clean up what they saved', { skip, timeout: 120000 }, async () => {
+  const lang = 'en';
+  const plan = loadPlan(lang);
+  const A = require(path.join(DEMO, 'texts'))[lang];
+  const app = await server.start({ lang });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const probeSteps = plan.steps.map((s, i) => s.probe && i + 1).filter(Boolean);
+  const panels = {};
+  try {
+    const { meta } = await autoWalk({
+      playwright, plan, browser: chosen, base: app.url, lang, walkDir, signIn,
+      options: { probe: true, auto: true, allowed: new Set(probeSteps), network: network.compileConfig() },
+      onPanel: async (page, { title }) => {
+        if (panels[title]) return;
+        panels[title] = await page.evaluate(() => {
+          const p = document.getElementById('__guided_smoke');
+          return { bad: p.querySelectorAll('[data-guided-smoke-bad]').length, rows: p.querySelectorAll('[data-guided-smoke-probe] tr').length,
+            counting: !!p.querySelector('[data-guided-smoke-countdown]') };
+        });
+      },
+    });
+    assert.strictEqual(meta.result, 'completed');
+    assert.strictEqual(meta.probe, true);
+    const events = readEvents(walkDir);
+    const [note, due, double, clean] = probeSteps.map(n => events.find(e => e.n === n && e.answer !== 'approved'));
+    assert.ok(events.filter(e => e.answer === 'approved').length === 4, 'every probe step asked first');
+
+    assert.deepStrictEqual(note.probe.rows.map(r => r.got), ['blocked', 'rejected', 'saved', 'rejected', 'rejected', 'saved', 'saved', 'saved', 'saved', 'crashed', 'saved']);
+    assert.deepStrictEqual(note.probe.rows.filter(r => !r.ok).map(r => r.n), [10], 'only the emoji, the demo\'s bug on purpose');
+    assert.deepStrictEqual([note.probe.rows[1].status, note.probe.rows[3].message], [422, A.noteLong], 'the application\'s message is kept');
+    assert.deepStrictEqual(note.probe.rows[9], { n: 10, value: 'SMOKE-P7 😀', expect: 'saved', from: 'catalog', got: 'crashed', why: 'server', status: 500, ok: false });
+    assert.ok(note.againstCheck, '✔ over a row that differs took the second click');
+    // The 500 is a browser error of the step; the refused values (422) belong to their tries.
+    assert.deepStrictEqual([note.browserErrors.http, note.browserErrors.first], [1, [{ kind: 'http', method: 'POST', url: '/orders/1001/notes', status: 500 }]]);
+
+    assert.deepStrictEqual(due.probe.rows.map(r => `${r.got}${r.why ? ' ' + r.why : ''}`), ['saved', 'saved', 'blocked validity', 'blocked validity', 'blocked refused', 'rejected']);
+    assert.ok(due.auto.ok && due.probe.rows.every(r => r.ok), due.auto.text);
+    assert.strictEqual(due.probe.rows[5].message, A.farDate);
+    assert.ok(double.auto.ok, double.auto.text);
+    assert.deepStrictEqual([clean.auto.ok, clean.auto.text], [true, '7 notes deleted.'], 'the clean-up matched what the probe and the double click saved');
+
+    // Every try opens the order again: once per try is no repeated call, and nothing went on by itself.
+    for (const e of [note, due, double, clean]) {
+      assert.ok(!(e.network.findings || []).some(f => f.kind === 'repeated'), `${e.n}: ${JSON.stringify(e.network.findings)}`);
+      assert.ok(!e.answeredBy, `${e.n} went on by itself`);
+      assert.strictEqual(panels[e.title].counting, false, `${e.n} showed a countdown`);
+    }
+    assert.deepStrictEqual([panels[note.title].rows, panels[note.title].bad], [12, 1], 'the panel\'s table: a head and 11 rows, one red');
+    const recorded = fs.readdirSync(walkDir).filter(f => fs.statSync(path.join(walkDir, f)).isFile())
+      .map(f => fs.readFileSync(path.join(walkDir, f), 'utf8')).join('\n');
+    assert.ok(!recorded.includes('x'.repeat(200)), 'a long value is kept as its label, never in full');
+    const { markdown, probeSteps: differing } = report.build(meta, events, null);
+    assert.deepStrictEqual(differing, [probeSteps[0]]);
+    assert.match(markdown, /## Probing/);
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+// A page of our own for what the demo does not show, served in the browser on the demo's address: a field with a
+// maxlength, a form another required field blocks, and a script form whose button is off while the field is empty and
+// sits under the panel's corner.
+const lab = ok => `<!doctype html><html><head><meta charset="utf-8"><title>Lab</title></head><body>
+<h1>Lab</h1><p id="ok"${ok ? "" : " hidden"}>Saved</p>
+<form id="f1" method="post" action="/lab/save"><input id="short" name="short" maxlength="5"><button id="send1">Send</button></form>
+<form id="f3" method="post" action="/lab/save"><input id="c" name="c"><input id="d" name="d" required><button id="send3">Send</button></form>
+<input id="name"><p id="done" hidden>Done</p>
+<button id="go" type="button" disabled style="position:fixed;right:24px;bottom:24px">Go</button>
+<script>
+fetch('/lab/config');
+const name = document.getElementById('name');
+const go = document.getElementById('go');
+name.addEventListener('input', () => { go.disabled = !name.value; });
+go.addEventListener('click', () => {
+  if (name.value === 'boom') throw new Error('boom');
+  fetch('/lab/api', { method: 'POST', body: name.value }).then(r => { if (r.ok) document.getElementById('done').hidden = false; });
+});
+</script></body></html>`;
+async function labRoute(route) {
+  const request = route.request();
+  const p = new URL(request.url()).pathname;
+  const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) }).catch(() => {});
+  // A save answers with the page itself: a redirect's next request would not come through the route.
+  if (p === '/lab' || p === '/lab/save') return route.fulfill({ status: 200, contentType: 'text/html', body: lab(p === '/lab/save') });
+  if (p === '/lab/config') return json(200, {});
+  const body = request.postData();
+  if (body === 'bad') return json(400, { errors: { name: ['Invalid'] } });
+  if (body === 'srv') return route.fulfill({ status: 500, contentType: 'text/plain', body: 'down' });
+  if (body === 'wait') await new Promise(r => setTimeout(r, 2500));
+  return json(200, { ok: true });
+}
+const labPlan = steps => ({ id: 'lab', title: 'Lab', lang: 'en', start: `/orders/${server.ORDER}`, ready: '#order-card', login: '/login',
+  steps: steps.map(s => ({ did: 'Lab.', expect: ['Lab.'], ...s })) });
+const v = (value, expect, from = 'code') => ({ value, expect, from });
+
+test('--probe sorts what a try leads to: a maxlength, a button off, an error answer with nothing on the screen, a script error, a server error, nothing at all, another field; probe() only in a probe step, once', { skip, timeout: 90000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const seen = {};
+  const plan = labPlan([
+    { title: 'Lab A', probe: true, run: async ({ page, context, goto, probe }) => {
+      await context.route('**/lab**', labRoute);
+      await goto('/lab');
+      await probe({ field: page.locator('#short'), submit: page.locator('#send1'), saved: page.locator('#ok'), values: [v('abc', 'saved'), v('abcdefgh', 'trimmed')] });
+    } },
+    { title: 'Lab B', probe: true, run: async ({ page, goto, probe }) => {
+      await goto('/lab');
+      await probe({
+        field: page.locator('#name'), submit: page.locator('#go'), saved: page.locator('#done'), timeout: 1000,
+        reset: async ({ page: p }) => {
+          seen.through = await p.evaluate(() => getComputedStyle(document.getElementById('__guided_smoke')).pointerEvents);
+          await p.goto(new URL('/lab', p.url()).toString());
+        },
+        values: [v('', 'blocked'), v('bad', 'rejected'), v('boom', 'rejected', 'catalog'), v('srv', 'rejected', 'catalog'), v('wait', 'saved', 'assumed'), v('ok', 'saved')],
+      });
+    } },
+    { title: 'Lab C', probe: true, run: async ({ page, goto, probe }) => {
+      await goto('/lab');
+      const spec = { field: page.locator('#c'), submit: page.locator('#send3'), saved: page.locator('#ok'), values: [v('x', 'saved')] };
+      await probe(spec);
+      await probe(spec);
+    } },
+    { title: 'Lab D', run: async ({ page, probe }) => {
+      await probe({ field: page.locator('#c'), submit: page.locator('#send3'), saved: page.locator('#ok'), values: [v('x', 'saved')] });
+    } },
+  ]);
+  try {
+    const { meta } = await autoWalk({ playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn,
+      options: { probe: true, network: network.compileConfig() } });
+    assert.strictEqual(meta.result, 'completed');
+    const [a, b, c, d] = [1, 2, 3, 4].map(n => readEvents(walkDir).find(e => e.n === n && e.answer !== 'approved'));
+    assert.deepStrictEqual(a.probe.rows.map(r => [r.got, r.changed, r.ok]), [['saved', undefined, true], ['saved', { typed: 8, kept: 5 }, true]], JSON.stringify(a.probe.rows));
+    const got = b.probe.rows.map(r => `${r.got}${r.why ? ' ' + r.why : ''}${r.status ? ' ' + r.status : ''}`);
+    assert.deepStrictEqual(got, ['blocked disabled', 'rejected http 400', 'crashed js', 'crashed server 500', 'unclear timeout', 'saved']);
+    assert.deepStrictEqual(b.probe.rows.map(r => r.ok), [true, true, false, false, false, true]);
+    assert.strictEqual(seen.through, 'none', 'while a probe runs the panel lets clicks through to the page');
+    // The 400 belongs to its try; the 500 and the script error are the step's browser errors too.
+    assert.deepStrictEqual([b.browserErrors.http, b.browserErrors.js], [1, 1], JSON.stringify(b.browserErrors));
+    assert.ok(!b.browserErrors.first.some(r => r.status === 400), JSON.stringify(b.browserErrors.first));
+    assert.ok(!b.network.findings.some(f => f.kind === 'repeated'), JSON.stringify(b.network.findings));
+    assert.deepStrictEqual(c.probe.rows.map(r => `${r.got} ${r.why}`), ['unclear other']);
+    assert.match(c.auto.text, /probe\(\) runs once per step/);
+    assert.match(d.auto.text, /probe\(\) runs only in a step marked probe: true/);
+    assert.ok(!d.probe);
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+test('■ Stop during a probe keeps the tries before it and stops the walk at that step', { skip, timeout: 60000 }, async () => {
+  const app = await server.start({ lang: 'en' });
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const plan = labPlan([
+    { title: 'Lab stop', probe: true, run: async ({ page, context, goto, probe }) => {
+      await context.route('**/lab**', labRoute);
+      await goto('/lab');
+      await probe({
+        field: page.locator('#short'), submit: page.locator('#send1'), saved: page.locator('#ok'), values: [v('a', 'saved'), v('b', 'saved'), v('c', 'saved')],
+        // The user presses ■ Stop in the panel while the first try's answer is shown.
+        reset: async ({ page: p }) => { await p.locator('#__guided_smoke [data-guided-smoke-answer="stop"]').click(); },
+      });
+    } },
+    { title: 'After', run: async () => {} },
+  ]);
+  try {
+    const { meta } = await autoWalk({ playwright, plan, browser: chosen, base: app.url, lang: 'en', walkDir, signIn, options: { probe: true } });
+    assert.strictEqual(meta.result, 'stopped');
+    const events = readEvents(walkDir);
+    const stop = events.find(e => e.answer === 'stop');
+    assert.deepStrictEqual([stop.n, stop.probe.tries, stop.probe.rows[0].got], [1, 1, 'saved']);
+    assert.ok(!events.some(e => e.n === 2), 'the walk ended at the probe step');
+  } finally {
+    await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
 
 test('--network: a critical finding holds --auto and a warning does not; the value box, the plan\'s ignore and a local error page are respected; no value reaches a record or the panel', { skip, timeout: 90000 }, async () => {
   const app = await server.start({ lang: 'en' });
