@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **Suites: a folder of plans walked in one go.** `run <folder>` walks every plan of the folder one after another
+  (`run smoke/ --env test` on a shared test server) and writes one report over them all. The plans are the folder's
+  `<name>.steps.js` files and the `steps.js` of its folders, in the order of those names, a number counting as a
+  number (`2-` before `10-`); a shared `envs.js` or a helper is not a plan. Each plan is a walk of its own, with its
+  own window, walk number and report, exactly as `run <file.js>` walks it.
+  - Every plan is loaded and checked before a browser opens. One that cannot be walked (a mistake in the plan, no such
+    environment, no address, an id used twice or already another plan's in the project) keeps the whole suite from
+    starting, and all of them are named.
+  - Every panel's header says where in the suite it is ("Plan 2/5 · Smoke 3 / 9"). Between two plans the closing
+    screen names the next plan and offers **▶ Next plan** and **■ Stop the suite**; the sign-out is offered after the
+    last plan.
+  - **■ Stop** in a step, or closing the window, ends the suite: the plans after it are "not walked". A plan that ends
+    with an error ends only itself; the next plan is walked, and the command ends with exit code 1.
+  - The suite's record and report are kept as `suites/<folder>-<n>/` in the project's data folder, numbered and never
+    overwritten: a row per plan with its walk, how it ended, its counts, time and what its own report flags; where the
+    suite was stopped, the plans not walked or ended with an error, changes not put back; every ✖ with its note; a
+    block to paste. A walk's own report names the suite it was a plan of.
+  - `--from`, `--only`, `--retry-failed`, `--work-item` and `--force` belong to one plan and are refused for a folder.
+    A name that is both a folder here and a plan of the project is refused, not guessed; written as a path
+    (`./smoke`) it is the folder.
+
 ## 1.5.0 — 2026-11-16
 
 - **Environments: one plan walks on this machine and on a shared test server.** A plan's `envs` names other

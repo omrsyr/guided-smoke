@@ -44,6 +44,7 @@ guided-smoke                          prepare a plan for the current work, show 
 guided-smoke plan [<id>]              prepare (or show) a plan only — no browser
 guided-smoke plan --probe [<id>]      add probe steps: boundary and wrong values for the change's form fields
 guided-smoke run <ref>                run a plan: a new walk is numbered after the last one
+guided-smoke run <folder>             run every plan of a folder one after another (a suite), with one report over all
 guided-smoke list                     plans and walks of this project
 guided-smoke report <ref>             report of a walk (default: the latest walk of the plan)
 guided-smoke demo                     try it on the built-in demo application (no project needed)
@@ -91,13 +92,18 @@ node run.js init <plan-id> [--title T] [--work-item N]   create plans/<plan-id>/
 node run.js run <ref|file.js> [--env <name>] [flags]
                                       run a walk (start it in the background and wait for it to finish); a file is
                                       linked into the plans, --force replaces another plan with the same id
+node run.js run <folder> [--env <name>] [flags]
+                                      a suite: the folder's <name>.steps.js files and the steps.js of its folders, in
+                                      name order, each a walk of its own; all are checked before a browser opens; ■ Stop
+                                      ends the suite, an error only its plan; not with --from, --only, --retry-failed,
+                                      --work-item, --force (see workflow, "A folder of plans")
 node run.js demo [flags]              start the demo application and walk its plan (same flags as run, except
                                       --base, --work-item, --allow-remote-writes, --force); walks are kept under
                                       project guided-smoke-demo (report demo --project guided-smoke-demo)
 node run.js list | report <ref> | reset-login | paths
 ```
 
-Exit codes: 0 done · 2 usage error · 3 runtime missing (`setup`) or Node.js too old · 4 reference not found or ambiguous · 1 other error.
+Exit codes: 0 done · 2 usage error · 3 runtime missing (`setup`) or Node.js too old · 4 reference not found or ambiguous · 1 other error (for a suite: a plan ended with an error).
 The project is the git repository's folder name (override with `--project`). Data lives outside the repository:
 `%LOCALAPPDATA%\guided-smoke` (Windows), `~/Library/Application Support/guided-smoke` (macOS),
 `~/.local/share/guided-smoke` (Linux), or `GUIDED_SMOKE_HOME`.

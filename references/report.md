@@ -41,6 +41,26 @@ rebuilds it. It contains:
 - **To paste into the work item:** a plain-text block with the ✔/✖ list (with the browser's error count per step) and
   the measured time; its first line names the environment ("Smoke on test (…)").
 
+## A suite's report
+
+`run <folder>` writes a report of each walk as above, and one over them all: `suites/<suite>-<n>/report.md` in the
+project's data folder (the suite is named after its folder; its records are numbered and never overwritten). It is
+built from the suite's record (`suite.json`: the plans, the walk each became, how that ended) and the walks' own:
+
+- **Header:** the suite and its number of plans, the environment, date and time, the measured walk time (the walks
+  added up), the addresses and application versions walked, the flags it ran with, the result (completed / stopped).
+- **Summary:** how many plans were walked and the steps' ✔ ✖ ⏭ ○ over all of them; where the user stopped it (in a
+  plan, or after one on the screen between two plans); the plans not walked; the plans that ended with an error; the
+  plans with a change not put back.
+- **Plans:** a row per plan in walking order: its walk (a link to that walk's report), how it ended, its counts and
+  time, and what its own report flags (a ✔ over a failed check, browser errors, network findings, probe rows that
+  differ, changes not put back), or the error it ended with.
+- **Different (✖):** every ✖ step of every plan, with the user's note.
+- **To paste:** a plain-text block with a line per plan and its ✖ steps. It is the suite's, for a release or test
+  cycle record; a work item still gets the paste block of its own plan's walk.
+
+A walk that was one plan of a suite names the suite in its own report's header.
+
 ## What to tell the user afterwards
 
 Keep it short:
@@ -57,6 +77,10 @@ Keep it short:
    tested.
 3. Every change not put back (⚠ in the summary): the step, why, and what to do by hand.
 4. The next action: fix and `--retry-failed` (with `--probe` for a probe step), or "all passed".
+
+After a suite, first the whole: the plans walked and not walked, where it was stopped, any plan that ended with an
+error and why. Then the points above per plan, only for plans that have something to say. The next action names the
+plan: `run <plan-id> --retry-failed`, or the folder again for the plans not walked.
 
 ## Effort
 

@@ -27,6 +27,7 @@ const { walk } = require('../engine');
  * @param {string[][]} [o.launched] receives the browser's command-line switches the walk asked for
  * @param {object} [o.options]   more walk options (auto, trace, video, panel)
  * @param {string} [o.profile]   a kept profile folder, as in a real walk (default: a throw-away one)
+ * @param {string} [o.walkId], [o.project]  the walk's id and project, when a test keeps several walks (a suite)
  */
 async function autoWalk(o) {
   let context = null;
@@ -91,7 +92,7 @@ async function autoWalk(o) {
   }, 150);
   try {
     return await walk({
-      plan: o.plan, planId: o.plan.id || 'plan', walkId: `${o.plan.id || 'plan'}-1`, project: 'test', walkDir: o.walkDir,
+      plan: o.plan, planId: o.plan.id || 'plan', walkId: o.walkId || `${o.plan.id || 'plan'}-1`, project: o.project || 'test', walkDir: o.walkDir,
       playwright, profile: o.profile || null,
       options: { browser: o.browser, base: o.base, pace: 'fast', allowed: null, fresh: !o.profile, lang: o.lang,
         locale: o.lang === 'tr' ? 'tr-TR' : 'en-US', screens: null, ...(o.options || {}) },

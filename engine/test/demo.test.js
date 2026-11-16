@@ -12,6 +12,7 @@ const browser = require('../browser');
 const report = require('../report');
 const { texts, format } = require('../i18n');
 const network = require('../network');
+const suites = require('../suite');
 const { autoWalk } = require('./harness');
 
 const DEMO = path.join(__dirname, '..', '..', 'examples', 'demo');
@@ -801,6 +802,91 @@ test('the test database: its own tab before the sign-in asks again after a refus
     for (const [k, v] of Object.entries(before)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     await new Promise(resolve => app.close(resolve));
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a suite: each plan is a walk of its own, the closing screen leads on to the next plan or ends the suite, ■ Stop ends it, an error ends only its plan; one report over them all', { skip, timeout: 180000 }, async () => {
+  const app = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><title>t</title><h1 id="page">page</h1>');
+  });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-suite-'));
+  const project = 'suite';
+  const t = texts('en');
+  const step = title => ({ title, did: 'x', expect: ['x'], run: async () => {} });
+  const plans = ['a', 'b', 'c'].map(id => ({ id, title: `Plan ${id.toUpperCase()}`, ready: '#page', steps: [step(`${id} one`), step(`${id} two`)] }));
+  // The suite as run.js walks it, with the harness in the user's place and the walks kept in a data folder of the test's.
+  const walkSuite = async (list, { stopAt, bases = {} } = {}) => {
+    const panels = [];
+    const { suite, save } = suites.begin({ project, folder: path.join(root, 'Nightly'), env: null, lang: 'en', flags: '', root,
+      plans: list.map(p => ({ name: p.id, planId: p.id, title: p.title })) });
+    await suites.runAll({
+      suite, save,
+      walkOne: async (p, at) => {
+        const walkId = store.nextWalkId(project, p.planId, root);
+        const walkDir = store.walkDir(project, walkId, root);
+        fs.mkdirSync(walkDir, { recursive: true });
+        at.started(walkId);
+        try {
+          const done = await autoWalk({
+            playwright, plan: list.find(x => x.id === p.planId), browser: chosen, base: bases[p.planId] || base, lang: 'en', walkDir, walkId, project, stopAt,
+            options: { suite: { id: at.id, index: at.index, total: at.total, next: at.next } },
+            onPanel: async (page, { header, title }) => panels.push({ plan: p.planId, header, title, did: await page.locator('#__guided_smoke').textContent(),
+              buttons: await page.locator('#__guided_smoke [data-guided-smoke-answer]').allTextContents() }),
+          });
+          return { walkId, result: done.meta.result, stopSuite: done.stopSuite };
+        } catch (e) {
+          e.walkId = walkId;
+          throw e;
+        }
+      },
+    });
+    return { suite, panels, report: suites.writeReport(project, suite.suiteId, root) };
+  };
+  const outcomes = s => s.plans.map(p => [p.walkId, p.result]);
+  try {
+    // Three plans, all walked: every panel says where in the suite it is, and each closing screen but the last leads on.
+    const all = await walkSuite(plans);
+    assert.deepStrictEqual([all.suite.suiteId, all.suite.result, outcomes(all.suite)], ['nightly-1', 'completed', [['a-1', 'completed'], ['b-1', 'completed'], ['c-1', 'completed']]]);
+    assert.deepStrictEqual(all.panels.filter(p => p.plan === 'b').map(p => [p.header, p.title]),
+      [['Plan 2/3 · Smoke 1 / 2', 'b one'], ['Plan 2/3 · Smoke 2 / 2', 'b two'], ['Plan 2/3 · Smoke 2 / 2', 'Plan 2/3 finished']]);
+    const closing = id => all.panels.filter(p => p.plan === id).pop();
+    assert.deepStrictEqual(closing('a').buttons, [t.suiteNext, t.suiteStop]);
+    assert.ok(closing('a').did.includes('Next in the suite: Plan B'), closing('a').did);
+    assert.deepStrictEqual([closing('c').title, closing('c').buttons], [t.doneTitle, [t.close]], 'the last plan closes as a walk of its own does');
+    assert.deepStrictEqual(store.readJson(path.join(store.walkDir(project, 'b-1', root), 'walk.json')).suite, { id: 'nightly-1', index: 2, total: 3 });
+    assert.match(all.report.markdown, /\n3 of 3 plans walked · ✔ 6 passed · ✖ 0 different · ⏭ 0 skipped · ○ 0 not run\n/);
+    assert.match(all.report.markdown, /\n\| 2 \| b — Plan B \| \[b-1\]\(\.\.\/\.\.\/walks\/b-1\/report\.md\) \| ✔ completed \| 2 \| 0 \| 0 \| 0 \| /);
+    assert.strictEqual(fs.readFileSync(path.join(store.suiteDir(project, 'nightly-1', root), 'report.md'), 'utf8'), all.report.markdown);
+
+    // ■ Stop in the second plan: that walk closes as a stopped walk does, and the third plan is not walked.
+    const stopped = await walkSuite(plans, { stopAt: 'b two' });
+    assert.deepStrictEqual([stopped.suite.result, outcomes(stopped.suite)], ['stopped', [['a-2', 'completed'], ['b-2', 'stopped'], [null, null]]]);
+    const last = stopped.panels.filter(p => p.plan === 'b').pop();
+    assert.deepStrictEqual([last.title, last.buttons], [t.doneTitle, [t.close]]);
+    assert.match(stopped.report.markdown, /\n■ Stopped by the user in b\.\n\n○ Not walked: c\.\n/);
+    assert.match(stopped.report.markdown, /\n\| 3 \| c — Plan C \| — \| ○ not walked \|/);
+
+    // A plan whose application does not answer ends with an error; the next plan is walked all the same.
+    const gone = http.createServer();
+    await new Promise(resolve => gone.listen(0, '127.0.0.1', resolve));
+    const closedPort = gone.address().port;
+    await new Promise(resolve => gone.close(resolve));
+    const failed = await walkSuite(plans.slice(0, 2), { bases: { a: `http://127.0.0.1:${closedPort}` } });
+    assert.deepStrictEqual([failed.suite.result, outcomes(failed.suite)], ['completed', [['a-3', 'error'], ['b-3', 'completed']]]);
+    assert.match(failed.suite.plans[0].error, /ERR_CONNECTION_REFUSED/);
+    assert.deepStrictEqual(failed.report.errors, ['a']);
+    assert.match(failed.report.markdown, /\n⚠ Ended with an error: a\.\n/);
+
+    // Stop on the screen between two plans: the first plan is complete, the suite ends there.
+    const between = await walkSuite(plans.slice(0, 2), { stopAt: 'Plan 1/2 finished' });
+    assert.deepStrictEqual([between.suite.result, outcomes(between.suite)], ['stopped', [['a-4', 'completed'], [null, null]]]);
+    assert.match(between.report.markdown, /\n■ Stopped by the user after a\.\n\n○ Not walked: b\.\n/);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

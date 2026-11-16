@@ -92,10 +92,35 @@ node <skill-dir>/engine/run.js run <plan-id> --base <url> [--work-item N] [other
   server: the panel then also shows the 🌐 line and its ⛔/⚠ findings under each step.
 - Do not poll. Wait until the command finishes.
 
+### A folder of plans (a suite)
+
+`run <folder>` walks every plan of a folder one after another: the plans of a release, or the ones a tester walks on
+the test server (`run smoke/ --env test`).
+
+- The plans are the folder's `<name>.steps.js` files and the `steps.js` of its folders; a shared `envs.js` or a helper
+  is not one. They run in the order of those names, a number counting as a number (`2-` before `10-`), so a prefix
+  orders them: `01-sign-in.steps.js`, `02-orders/steps.js`. A prefixed file keeps its plan id with `id:
+  '6655-machine-expiry'` in the module, and with it its walk numbers and comparisons.
+- Every plan is loaded and checked before a browser opens. One that cannot be walked (a mistake in the plan, no such
+  environment, no address, an id used twice or already another plan's in the project) keeps the whole suite from
+  starting, and all of them are named.
+- Each plan is a walk of its own: a browser window of its own with the project's smoke profile, its own walk number
+  and report. Every panel's header says where in the suite it is ("Plan 2/5 · Smoke 3 / 9"). Between two plans the
+  closing screen names the next plan: **▶ Next plan** goes on, **■ Stop the suite** ends there.
+- **■ Stop** in a step, or closing the window, ends the suite: the plans after it are "not walked". A plan that ends
+  with an error (its application did not answer) ends only itself: the next plan is walked, and the command ends with
+  exit code 1.
+- `--from`, `--only`, `--retry-failed`, `--work-item` and `--force` belong to one plan and are refused for a folder.
+  To retry one plan's ✖ steps afterwards: `run <plan-id> --retry-failed`.
+- A name that is both a folder here and a plan of the project is refused; written as a path (`./smoke`) it is the
+  folder.
+- Tell the user beforehand how many plans there are, their order, and roughly how long they take together.
+
 ## 6. Report
 
 `run` writes `report.md` at the end; `node run.js report <ref>` rebuilds it. Read it and give the user a short
-summary: counts, every ✖ with its note, the measured time. Follow [report](report.md).
+summary: counts, every ✖ with its note, the measured time. Follow [report](report.md). After a suite, read the
+suite's report (`run` prints its path as `suite report:`), then the report of each walk it flags.
 
 ## 7. Fix and retry
 

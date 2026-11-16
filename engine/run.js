@@ -6,6 +6,7 @@
 //   node run.js doctor [--base <url>]                  data folder, project, browser, runtime; --base: what the browser meets there
 //   node run.js init <plan-id> [--title T] [--work-item N] [--force]
 //   node run.js run <plan|walk|work-item|file.js> [--env <name>] [flags] [--force]
+//   node run.js run <folder> [--env <name>] [flags]    walk every plan of the folder, one after another (a suite)
 //   node run.js demo [flags]                           walk the demo plan against the built-in demo application
 //   node run.js list
 //   node run.js report <plan|walk|work-item>
@@ -23,6 +24,7 @@ const { pickLanguage, systemLocale, LANGUAGES } = require('./i18n');
 const { compileIgnore } = require('./errors');
 const { compileConfig } = require('./network');
 const { checkEnvs, pickEnv } = require('./envs');
+const suites = require('./suite');
 
 const PLAYWRIGHT_VERSION = '1.63.0';
 // The floor of that playwright-core: below it, loading it ends the process with its own message.
@@ -140,6 +142,30 @@ function planSource(planPath) {
   return target;
 }
 
+/** A plan file's id: its own "id", else the folder of a steps.js, else the file name without ".steps.js". */
+function planIdOf(file, plan) {
+  const fromName = path.basename(file).toLowerCase() === 'steps.js'
+    ? path.basename(path.dirname(file))
+    : path.basename(file).replace(/(\.steps)?\.c?js$/i, '');
+  const planId = String(plan.id || fromName).toLowerCase();
+  if (!store.PLAN_ID.test(planId)) throw new UsageError(`Cannot derive a plan id from ${file}; add id: '...' to the module.`);
+  return planId;
+}
+
+/** The project's stored plan with this id when it is another plan than the file, else null. */
+function otherPlan(project, planId, file) {
+  const target = store.planFile(project, planId);
+  return !samePath(target, file) && !samePlan(target, file) ? target : null;
+}
+
+/** Links a plan file into the project's plans, so that list, report and a later run find it by its id. */
+function linkPlan(project, planId, file) {
+  const target = store.planFile(project, planId);
+  if (samePath(target, file)) return;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, pointerTo(file));
+}
+
 // What a step may say. Anything else is a mistake the engine would otherwise pass over in silence (a skipIf that never
 // skips), so it is refused like an unknown flag.
 const STEP_KEYS = ['title', 'did', 'expect', 'run', 'check', 'approve', 'skipTo', 'probe', 'undo', 'db'];
@@ -242,7 +268,7 @@ function writeReport(project, planId, walkId) {
 async function main() {
   const { command, positional, flags } = parse(process.argv.slice(2));
   if (command === 'help' || flags.help) {
-    console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 14).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
+    console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 15).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
     return EXIT.ok;
   }
   if (Number(process.versions.node.split('.')[0]) < MIN_NODE) {
@@ -370,29 +396,32 @@ async function main() {
 
   // ---- run ----
   const ref = positional[0];
-  if (!ref) throw new UsageError('run needs a plan, walk, work item or steps file.');
+  if (!ref) throw new UsageError('run needs a plan, walk, work item, steps file or folder of plans.');
   if (positional.length > 1) throw new UsageError('run takes one plan reference.');
   let planId;
   let sourceWalk = null;
-  const asFile = /\.c?js$/i.test(ref) && fs.existsSync(path.resolve(ref));
+  const there = fs.existsSync(path.resolve(ref)) ? fs.statSync(path.resolve(ref)) : null;
+  if (there && there.isDirectory()) {
+    // "smoke" may name a folder here and a plan of the project at once: nothing is guessed. Written as a path
+    // (./smoke) it is the folder.
+    let also = null;
+    try { also = store.resolve(project, ref); } catch { /* a folder only */ }
+    if (also) {
+      throw new UsageError(`"${ref}" is both a folder here and ${also.walkId ? `walk ${also.walkId}` : `plan ${also.planId}`} of this project. For the folder (a suite) write it as a path: .${path.sep}${ref}. For the plan give its file: ${store.planFile(project, also.planId)}.`);
+    }
+    return runSuite({ project, folder: path.resolve(ref), flags });
+  }
+  const asFile = /\.c?js$/i.test(ref) && !!there;
   if (asFile) {
     const file = path.resolve(ref);
     const plan = loadPlan(file);
-    // A plan's id is its own "id", else the folder of a steps.js, else the file name without ".steps.js".
-    const fromName = path.basename(file).toLowerCase() === 'steps.js'
-      ? path.basename(path.dirname(file))
-      : path.basename(file).replace(/(\.steps)?\.c?js$/i, '');
-    planId = String(plan.id || fromName).toLowerCase();
-    if (!store.PLAN_ID.test(planId)) throw new UsageError(`Cannot derive a plan id from ${file}; add id: '...' to the module.`);
+    planId = planIdOf(file, plan);
     // A different plan already stored under this id is replaced only with --force.
-    const target = store.planFile(project, planId);
-    if (!samePath(target, file)) {
-      if (!samePlan(target, file) && !flags.force) {
-        throw new UsageError(`Plan ${planId} already exists in this project (${target}). Give the module another id, or use --force to replace it with a link to ${file}.`);
-      }
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, pointerTo(file));
+    const other = otherPlan(project, planId, file);
+    if (other && !flags.force) {
+      throw new UsageError(`Plan ${planId} already exists in this project (${other}). Give the module another id, or use --force to replace it with a link to ${file}.`);
     }
+    linkPlan(project, planId, file);
   } else {
     const r = store.resolve(project, ref);
     planId = r.planId;
@@ -401,10 +430,11 @@ async function main() {
   return runWalk({ project, planId, planPath: store.planFile(project, planId), flags, sourceWalk });
 }
 
-/** One walk of a plan: checks the flags, opens the browser, writes the report. */
-async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) {
-  const source = planSource(planPath);
-  const plan = loadPlan(source);
+/**
+ * A plan made ready to walk: loaded and checked, its environment picked, the steps to walk chosen. Null, after saying
+ * so, when --retry-failed finds nothing to retry. `plan`: the plan when the caller has loaded it already.
+ */
+function planSettings({ project, planId, source, flags, sourceWalk = null, plan = loadPlan(source) }) {
   const total = plan.steps.length;
   let env;
   try { env = pickEnv(plan, flags.env); } catch (e) { throw new UsageError(e.message); }
@@ -426,7 +456,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
     const src = sourceWalk || latestWalkIn(project, planId, env.name);
     if (!src) throw Object.assign(new Error(`Plan ${planId} has no walk${env.name ? ` in environment ${env.name}` : ''} to retry.`), { exit: EXIT.resolve });
     const failed = [...report.finalStates(store.readEvents(project, src)).values()].filter(e => e.answer === 'diff').map(e => e.n);
-    if (failed.length === 0) { console.log(`Walk ${src} has no steps marked different; nothing to retry.`); return EXIT.ok; }
+    if (failed.length === 0) { console.log(`Walk ${src} has no steps marked different; nothing to retry.`); return null; }
     allowed = new Set(failed);
     filterNote = `--retry-failed ${src}: ${failed.join(',')}`;
   }
@@ -435,31 +465,52 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
     const probes = [...allowed].filter(n => plan.steps[n - 1].probe).sort((a, b) => a - b);
     if (probes.length) throw new UsageError(`Step${probes.length > 1 ? 's' : ''} ${probes.join(', ')} ${probes.length > 1 ? 'are probe steps' : 'is a probe step'}: add --probe to run ${probes.length > 1 ? 'them' : 'it'}.`);
   }
+  return { plan, env, allowed, filterNote };
+}
 
+/** The flags that say how a walk looks and goes, checked: the same for every plan of a suite. */
+function lookSettings(flags) {
   if (flags.pace && !['slow', 'normal', 'fast'].includes(flags.pace)) throw new UsageError('--pace must be slow, normal or fast.');
   if (flags.screens && !['diff', 'all'].includes(flags.screens)) throw new UsageError('--screens must be diff or all (leave it out for none).');
   if (flags.lang && !LANGUAGES.includes(flags.lang)) throw new UsageError(`--lang must be one of: ${LANGUAGES.join(', ')}.`);
   if (flags.locale && !/^[a-z]{2}(-[A-Z]{2})?$/.test(flags.locale)) throw new UsageError('--locale looks like tr-TR or en-US.');
-  const panel = parsePanel(flags.panel);
+  return { panel: parsePanel(flags.panel) };
+}
+
+/** The address a plan is walked at: --base, else its environment's. */
+function addressOf(flags, env) {
   const base = flags.base || env.base;
   if (!base) throw new UsageError(`No address: pass --base https://host:port or set base in the plan${env.name ? ` or in envs.${env.name}` : ''}.`);
   try { new URL(base); } catch { throw new UsageError(`--base "${base}" is not a URL.`); }
+  return base;
+}
 
+/** The browser and the runtime a walk needs, found before any window opens. */
+function tools(flags) {
   const chosen = browser.choose(flags.browser);
   const playwright = loadPlaywright();
   if (flags.video && !browser.videoReady(store.runtimeDir())) {
     throw Object.assign(new Error("--video needs Playwright's ffmpeg (about 4 MB, from Playwright's download servers). Install it once: node run.js setup --video"), { exit: EXIT.runtime });
   }
+  return { chosen, playwright };
+}
 
+/**
+ * Walks a prepared plan: opens the browser, writes the report. Resolves to { walkId, result, stopSuite }; an error
+ * carries the walk's id. `suite`: the walk's place in a suite, as suite.runAll hands it over.
+ */
+async function startWalk({ project, planId, source, plan, env, allowed, filterNote, base, panel, chosen, playwright, flags, suite = null }) {
   const walkId = store.nextWalkId(project, planId);
   const walkDir = store.walkDir(project, walkId);
   fs.mkdirSync(walkDir, { recursive: true });
   fs.copyFileSync(source, path.join(walkDir, 'steps.snapshot.js'));
-  console.log(`walk ${walkId} · ${chosen.name} (${chosen.source}) · ${base}${env.name ? ` · env ${env.name}` : ''}${filterNote ? ' · ' + filterNote : ''}`);
+  if (suite) suite.started(walkId);
+  console.log(`walk ${walkId} · ${chosen.name} (${chosen.source}) · ${base}${env.name ? ` · env ${env.name}` : ''}${filterNote ? ' · ' + filterNote : ''}${suite ? ` · suite ${suite.id}, plan ${suite.index}/${suite.total}` : ''}`);
 
   const { walk } = require('./engine');
+  let done;
   try {
-    await walk({
+    done = await walk({
       plan, planId, walkId, project, walkDir, playwright, profile: store.profileDir(project, chosen.name),
       options: {
         browser: chosen, base, pace: flags.pace || 'slow', allowed, filterNote, skipWrites: !!flags['skip-writes'],
@@ -469,6 +520,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
         auto: !!flags.auto, trace: !!flags.trace, video: !!flags.video, panel,
         network: flags.network ? compileConfig(plan.network) : null, probe: !!flags.probe,
         env: env.name, start: env.start, data: env.data, db: env.db, signIn: env.signIn, login: env.login,
+        suite: suite ? { id: suite.id, index: suite.index, total: suite.total, next: suite.next } : null,
       },
     });
   } catch (e) {
@@ -477,12 +529,84 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
     }
     const r = (() => { try { return writeReport(project, planId, walkId); } catch { return null; } })();
     if (r) console.log(`report: ${r.file}`);
+    if (e && typeof e === 'object') e.walkId = walkId;
     throw e;
   }
   const r = writeReport(project, planId, walkId);
   console.log(`report: ${r.file}`);
   console.log(`result: ${r.meta.result} · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}${r.against.length ? ` · ⚠ passed over a failed check: ${r.against.join(', ')}` : ''}${r.errorSteps.length ? ` · ⚠ browser errors in steps: ${r.errorSteps.join(', ')}` : ''}${r.networkSteps.length ? ` · ⚠ network findings in steps: ${r.networkSteps.join(', ')}` : ''}${r.probeSteps.length ? ` · ⚠ probe rows different in steps: ${r.probeSteps.join(', ')}` : ''}${r.undoLeft.length ? ` · ⚠ not put back (undo): steps ${r.undoLeft.join(', ')}` : ''}`);
+  return { walkId, result: r.meta.result, stopSuite: !!(done && done.stopSuite) };
+}
+
+/** One walk of a plan: checks the flags, opens the browser, writes the report. */
+async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) {
+  const source = planSource(planPath);
+  const picked = planSettings({ project, planId, source, flags, sourceWalk });
+  if (!picked) return EXIT.ok;
+  const look = lookSettings(flags);
+  const base = addressOf(flags, picked.env);
+  await startWalk({ project, planId, source, ...picked, ...look, base, ...tools(flags), flags });
   return EXIT.ok;
+}
+
+// What belongs to one plan: its step numbers, its work item, replacing its stored copy.
+const ONE_PLAN_FLAGS = ['from', 'only', 'retry-failed', 'work-item', 'force'];
+
+/**
+ * A folder walked as a suite. Every plan is loaded and checked before a browser opens: one that cannot be walked keeps
+ * the whole suite from starting, with all of them named. Then one walk after another, and one report over them.
+ */
+async function runSuite({ project, folder, flags }) {
+  const stray = ONE_PLAN_FLAGS.filter(f => flags[f]);
+  if (stray.length) {
+    throw new UsageError(`${folder} is a folder, walked as a suite: ${stray.map(f => '--' + f).join(', ')} ${stray.length > 1 ? 'belong' : 'belongs'} to one plan. Walk that plan by itself.`);
+  }
+  const entries = suites.discover(folder);
+  if (!entries.length) throw new UsageError(`No plans in ${folder}: a suite's plans are its <name>.steps.js files and the steps.js of its folders.`);
+  const look = lookSettings(flags);
+
+  const ready = [];
+  const problems = [];
+  const ids = new Map();
+  for (const entry of entries) {
+    const shown = path.relative(folder, entry.file).split(path.sep).join('/');
+    try {
+      const plan = loadPlan(entry.file);
+      const planId = planIdOf(entry.file, plan);
+      if (ids.has(planId)) throw new UsageError(`its id "${planId}" is also the id of ${ids.get(planId)}. Give one of them an id of its own (id: '…').`);
+      ids.set(planId, shown);
+      const other = otherPlan(project, planId, entry.file);
+      if (other) throw new UsageError(`the project already has another plan with the id ${planId} (${other}). Give this one another id, or walk it once by itself with --force to replace that plan.`);
+      const picked = planSettings({ project, planId, source: entry.file, flags, plan });
+      ready.push({ name: entry.name, planId, title: plan.title || planId, source: entry.file, ...picked, base: addressOf(flags, picked.env) });
+    } catch (e) {
+      // A plan that does not load (a syntax error, a missing require) is as much in the way as one the engine refuses.
+      const text = String(e && e.message ? e.message : e).split('\n')[0];
+      problems.push(`- ${shown}: ${text.startsWith(`${entry.file}: `) ? text.slice(entry.file.length + 2) : text}`);
+    }
+  }
+  if (problems.length) {
+    throw new UsageError(`The suite was not started: ${problems.length} of its ${entries.length} plan${entries.length > 1 ? 's' : ''} cannot be walked.\n${problems.join('\n')}`);
+  }
+
+  const shared = { ...look, ...tools(flags) };
+  for (const p of ready) linkPlan(project, p.planId, p.source);
+  const given = Object.entries(flags).filter(([k]) => k !== 'project' && k !== 'json').map(([k, v]) => (v === true ? `--${k}` : `--${k} ${v}`)).join(' ');
+  const { suite, save } = suites.begin({
+    project, folder, env: flags.env || null, lang: pickLanguage(flags.lang || ready[0].plan.lang), flags: given, plans: ready,
+  });
+  console.log(`suite ${suite.suiteId} · ${ready.length} plan${ready.length > 1 ? 's' : ''}${flags.env ? ` · env ${flags.env}` : ''}: ${ready.map(p => p.planId).join(', ')}`);
+  const byId = new Map(ready.map(p => [p.planId, p]));
+  await suites.runAll({
+    suite, save,
+    walkOne: (p, at) => startWalk({ project, ...byId.get(p.planId), ...shared, flags, suite: at }),
+    // A walk's error ends that plan only: it is said here, in one line, and the next plan is walked.
+    onError: p => console.error(`error in ${p.walkId || p.planId}: ${p.error}`),
+  });
+  const r = suites.writeReport(project, suite.suiteId);
+  console.log(`suite report: ${r.file}`);
+  console.log(`suite result: ${suite.result} · plans ${r.walked}/${r.total} walked · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}${r.notWalked.length ? ` · not walked: ${r.notWalked.join(', ')}` : ''}${r.errors.length ? ` · ⚠ ended with an error: ${r.errors.join(', ')}` : ''}${r.undoLeft.length ? ` · ⚠ not put back (undo) in: ${r.undoLeft.join(', ')}` : ''}`);
+  return r.errors.length ? EXIT.error : EXIT.ok;
 }
 
 main().then(code => { process.exitCode = code; }).catch(e => {

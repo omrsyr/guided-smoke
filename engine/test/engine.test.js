@@ -17,6 +17,7 @@ const probing = require('../probe');
 const { texts } = require('../i18n');
 const { checkEnvs, pickEnv } = require('../envs');
 const sqlDb = require('../db');
+const suites = require('../suite');
 const { appUrl, signInError, isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
 const RUN = path.join(__dirname, '..', 'run.js');
 const P = 'demo';
@@ -1159,6 +1160,174 @@ test('a call repeats only when it follows itself without a pause: a timer\'s cal
   assert.deepStrictEqual(await repeated(), ['/api/badges ×3']);
   net.input(NaN);
   assert.ok(net.inputs.every(Number.isFinite), 'a time that is no number is not kept');
+});
+
+const ONE_STEP = "{ title: 'a', run: async () => {} }";
+function folderOf(files) {
+  const folder = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-suite-')), 'Smoke Tests');
+  fs.mkdirSync(folder);
+  for (const [name, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(folder, name)), { recursive: true });
+    fs.writeFileSync(path.join(folder, name), text);
+  }
+  return folder;
+}
+const suiteRecords = name => (fs.existsSync(store.suitesDir(P)) ? fs.readdirSync(store.suitesDir(P)) : []).filter(d => d.startsWith(`${name}-`));
+
+test('a suite is a folder: its plans are the <name>.steps.js files and the steps.js of its folders, in name order with numbers as numbers', () => {
+  const plan = `module.exports = { steps: [${ONE_STEP}] };`;
+  const folder = folderOf({
+    '10-reports.steps.js': plan, '2-orders/steps.js': plan, '2-orders/texts.js': 'module.exports = {};', '01-sign-in.steps.js': plan,
+    'envs.js': 'module.exports = {};', 'helpers/util.js': 'module.exports = {};', 'deep/er/steps.js': plan, 'notes.steps.md': 'x',
+  });
+  const found = suites.discover(folder);
+  assert.deepStrictEqual(found.map(e => e.name), ['01-sign-in', '2-orders', '10-reports']);
+  assert.deepStrictEqual(found.map(e => path.relative(folder, e.file).split(path.sep).join('/')), ['01-sign-in.steps.js', '2-orders/steps.js', '10-reports.steps.js']);
+  // A suite is named after its folder, and its records are numbered as walks are.
+  assert.strictEqual(suites.nameOf(folder), 'smoke-tests');
+  assert.strictEqual(store.nextSuiteId(P, 'numbered'), 'numbered-1');
+  for (const n of [1, 7]) fs.mkdirSync(store.suiteDir(P, `numbered-${n}`), { recursive: true });
+  assert.strictEqual(store.nextSuiteId(P, 'numbered'), 'numbered-8');
+});
+
+test('a suite is checked whole before a browser opens: every plan that cannot be walked is named, and nothing is started or linked', () => {
+  const empty = folderOf({ 'envs.js': 'module.exports = {};' });
+  const none = cli('run', empty);
+  assert.strictEqual(none.status, 2);
+  assert.match(none.stderr, /No plans in .*Smoke Tests: a suite's plans are its <name>\.steps\.js files and the steps\.js of its folders\./);
+
+  const env = "base: 'http://localhost:1', envs: { test: { base: 'http://localhost:2' } }";
+  const folder = folderOf({
+    '01-good.steps.js': `module.exports = { ${env}, steps: [${ONE_STEP}] };`,
+    '02-no-env.steps.js': `module.exports = { base: 'http://localhost:1', envs: { uat: {} }, steps: [${ONE_STEP}] };`,
+    '03-bad-key/steps.js': `module.exports = { ${env}, steps: [{ title: 'b', skipIf: () => true, run: async () => {} }] };`,
+    '04-broken.steps.js': 'module.exports = {',
+    '05-twin.steps.js': `module.exports = { id: '01-good', ${env}, steps: [${ONE_STEP}] };`,
+    '06-taken.steps.js': `module.exports = { id: 'login-flow', ${env}, steps: [${ONE_STEP}] };`,
+    '07-no-address.steps.js': `module.exports = { envs: { test: {} }, steps: [${ONE_STEP}] };`,
+  });
+  const r = cli('run', folder, '--env', 'test');
+  assert.strictEqual(r.status, 2, r.stderr);
+  assert.match(r.stderr, /The suite was not started: 6 of its 7 plans cannot be walked\./);
+  assert.match(r.stderr, /\n- 02-no-env\.steps\.js: The plan has no environment "test"\. Its environments: uat\./);
+  assert.match(r.stderr, /\n- 03-bad-key\/steps\.js: step 1 \("b"\) has an unknown key "skipIf"\./, 'the file is named once, as it sits in the folder');
+  assert.match(r.stderr, /\n- 04-broken\.steps\.js: \S/);
+  assert.match(r.stderr, /\n- 05-twin\.steps\.js: its id "01-good" is also the id of 01-good\.steps\.js\./);
+  assert.match(r.stderr, /\n- 06-taken\.steps\.js: the project already has another plan with the id login-flow /);
+  assert.match(r.stderr, /\n- 07-no-address\.steps\.js: No address: /);
+  assert.ok(!fs.existsSync(store.planFile(P, '01-good')), 'the plan that could be walked is not linked either');
+  assert.deepStrictEqual(suiteRecords('smoke-tests'), []);
+  assert.ok(require(store.planFile(P, 'login-flow')).steps, 'the project\'s own plan is untouched');
+
+  // What belongs to one plan is refused for a folder; a flag every walk shares is checked once.
+  for (const flag of [['--only', '1'], ['--from', '1'], ['--retry-failed'], ['--work-item', '7'], ['--force']]) {
+    const refused = cli('run', folder, ...flag);
+    assert.strictEqual(refused.status, 2, flag[0]);
+    assert.ok(refused.stderr.includes(`is a folder, walked as a suite: ${flag[0]} belongs to one plan.`), refused.stderr);
+  }
+  const pace = cli('run', folder, '--pace', 'warp');
+  assert.strictEqual(pace.status, 2);
+  assert.match(pace.stderr, /^--pace must be/);
+});
+
+test('a name that is both a folder here and a plan of the project is refused, not guessed; written as a path it is the folder', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-suite-'));
+  fs.mkdirSync(path.join(cwd, 'login-flow'));
+  const at = (...args) => spawnSync(process.execPath, [RUN, ...args, '--project', P], { cwd, env: { ...process.env, GUIDED_SMOKE_HOME: home }, encoding: 'utf8' });
+  const both = at('run', 'login-flow');
+  assert.strictEqual(both.status, 2);
+  assert.match(both.stderr, /"login-flow" is both a folder here and plan login-flow of this project\. For the folder \(a suite\) write it as a path: \.[\\/]login-flow\. For the plan give its file: .*steps\.js\./);
+  const folder = at('run', `.${path.sep}login-flow`);
+  assert.strictEqual(folder.status, 2);
+  assert.match(folder.stderr, /No plans in /);
+});
+
+test('a suite goes on after a plan that ends with an error and ends where the user stops it; its record says how each plan ended', async () => {
+  const run = async outcomes => {
+    const { suite, save } = suites.begin({
+      project: P, folder: path.join(os.tmpdir(), 'Nightly'), env: 'test', lang: 'en', flags: '--env test',
+      plans: outcomes.map((o, i) => ({ name: `0${i}-p`, planId: `p${i}`, title: `Plan ${i}`, plan: { secret: 'not kept' } })),
+    });
+    const seen = [];
+    await suites.runAll({
+      suite, save,
+      walkOne: async (p, at) => {
+        seen.push([p.planId, at.id, at.index, at.total, at.next]);
+        at.started(`${p.planId}-1`);
+        assert.strictEqual(store.readJson(path.join(store.suiteDir(P, suite.suiteId), 'suite.json')).plans[at.index - 1].result, 'running', 'a walk under way is on record');
+        const o = outcomes[at.index - 1];
+        if (o instanceof Error) throw o;
+        return { walkId: `${p.planId}-1`, ...o };
+      },
+    });
+    return { suite, seen, saved: store.readJson(path.join(store.suiteDir(P, suite.suiteId), 'suite.json')) };
+  };
+  const failed = await run([new Error('the page did not open\n    at somewhere'), { result: 'completed' }, { result: 'completed' }]);
+  assert.deepStrictEqual(failed.suite.plans.map(p => [p.walkId, p.result, p.error]), [['p0-1', 'error', 'the page did not open'], ['p1-1', 'completed', undefined], ['p2-1', 'completed', undefined]]);
+  assert.strictEqual(failed.suite.result, 'completed');
+  assert.deepStrictEqual(failed.seen, [['p0', 'nightly-1', 1, 3, 'Plan 1'], ['p1', 'nightly-1', 2, 3, 'Plan 2'], ['p2', 'nightly-1', 3, 3, null]]);
+  assert.deepStrictEqual(Object.keys(failed.saved.plans[0]).sort(), ['error', 'name', 'planId', 'result', 'title', 'walkId'], 'the record keeps names and outcomes, not the plans');
+
+  const stopped = await run([{ result: 'completed' }, { result: 'stopped' }, { result: 'completed' }]);
+  assert.deepStrictEqual(stopped.suite.plans.map(p => p.result), ['completed', 'stopped', null]);
+  assert.deepStrictEqual([stopped.suite.suiteId, stopped.saved.result, stopped.seen.length, !!stopped.saved.endedAt], ['nightly-2', 'stopped', 2, true]);
+
+  // Stop on the screen between two plans: the plan before it is complete, the suite is not.
+  const between = await run([{ result: 'completed', stopSuite: true }, { result: 'completed' }]);
+  assert.deepStrictEqual(between.suite.plans.map(p => p.result), ['completed', null]);
+  assert.strictEqual(between.saved.result, 'stopped');
+});
+
+test('the suite report has a row per plan with its walk, says what was stopped, failed or not walked, lists every ✖ with its note and carries a paste block', () => {
+  for (const id of ['8001-orders', '8002-broken', '8003-invoices']) plan(id);
+  const at = { startedAt: '2026-11-03T12:00:00Z', readyAt: '2026-11-03T12:01:00Z', endedAt: '2026-11-03T12:11:00Z', env: 'test', base: 'https://test01/App', appVersion: '2.3.1' };
+  walk('8001-orders-1', { ...at, suite: { id: 'release-1', index: 1, total: 4 } }, [
+    { n: 1, title: 'one', kind: 'undo', answer: 'registered', what: 'the order goes back' }, { n: 1, title: 'one', answer: 'pass' },
+    { n: 2, title: 'two', answer: 'diff', note: 'wrong\ttotal' }, { n: 3, title: 'three', answer: 'pass', againstCheck: true },
+  ]);
+  walk('8002-broken-1', { ...at, appVersion: undefined, readyAt: null, measuredSeconds: null, result: 'error', error: 'net::ERR_CONNECTION_REFUSED' }, []);
+  walk('8003-invoices-1', { ...at, measuredSeconds: 45, result: 'stopped' }, [{ n: 1, title: 'one', answer: 'pass' }, { n: 2, title: 'two', answer: 'stop' }]);
+  const suite = {
+    suiteId: 'release-1', name: 'release', project: P, env: 'test', lang: 'en', with: '--env test --probe', startedAt: at.startedAt,
+    endedAt: '2026-11-03T12:30:00Z', result: 'stopped',
+    plans: [
+      { name: '01-orders', planId: '8001-orders', title: 'Orders', walkId: '8001-orders-1', result: 'completed' },
+      { name: '02-broken', planId: '8002-broken', title: '8002-broken', walkId: '8002-broken-1', result: 'error', error: 'net::ERR_CONNECTION_REFUSED' },
+      { name: '03-invoices', planId: '8003-invoices', title: 'Invoices', walkId: '8003-invoices-1', result: 'stopped' },
+      { name: '04-later', planId: '8004-later', title: 'Later', walkId: null, result: null },
+    ],
+  };
+  fs.mkdirSync(store.suiteDir(P, 'release-1'), { recursive: true });
+  fs.writeFileSync(path.join(store.suiteDir(P, 'release-1'), 'suite.json'), JSON.stringify(suite));
+  const r = suites.writeReport(P, 'release-1');
+  assert.deepStrictEqual([r.walked, r.total, r.counts, r.errors, r.notWalked, r.undoLeft],
+    [3, 4, { pass: 3, diff: 1, skip: 0, none: 5 }, ['8002-broken'], ['8004-later'], ['8001-orders']]);
+  const md = fs.readFileSync(r.file, 'utf8');
+  assert.strictEqual(md, r.markdown);
+  for (const line of [
+    '# Smoke suite report — release-1', '- **Suite:** release — 4 plans', '- **Environment:** test', '- **Address:** https://test01/App',
+    '- **Application version:** 2.3.1', '- **Walked with:** `--env test --probe`', '- **Result:** stopped by the user',
+    '- **Measured walk time:** 11 min (the walks added up; sign-in waits excluded; your own extra checking is not included)',
+    '3 of 4 plans walked · ✔ 3 passed · ✖ 1 different · ⏭ 0 skipped · ○ 5 not run',
+    '■ Stopped by the user in 8003-invoices.', '○ Not walked: 8004-later.', '⚠ Ended with an error: 8002-broken.',
+    '⚠ Changes not put back: 8001-orders (steps 1). They are still in place; see that walk\'s report.',
+    '| 1 | 8001-orders — Orders | [8001-orders-1](../../walks/8001-orders-1/report.md) | ✖ completed | 2 | 1 | 0 | 0 | 10 min | ⚠ passed over a failed check: 3 · ⚠ not put back (undo): steps 1 |',
+    '| 2 | 8002-broken | [8002-broken-1](../../walks/8002-broken-1/report.md) | ✖ ended with an error | 0 | 0 | 0 | 3 | — | net::ERR_CONNECTION_REFUSED |',
+    '| 3 | 8003-invoices — Invoices | [8003-invoices-1](../../walks/8003-invoices-1/report.md) | ■ stopped by the user | 1 | 0 | 0 | 2 | 45 s |  |',
+    '| 4 | 8004-later — Later | — | ○ not walked |  |  |  |  |  |  |',
+    '## Different (✖)', '- **8001-orders** · 2. two — wrong total',
+    'Smoke suite release on test (2026-11-03, 3/4 plans; guided-smoke release-1)', '✖ 8001-orders: 2/3 (8001-orders-1)', '   ✖ 2. two — wrong total',
+    '✖ 8002-broken: ended with an error, 0/0 (8002-broken-1) — net::ERR_CONNECTION_REFUSED', '■ 8003-invoices: stopped by the user, 1/1 (8003-invoices-1)',
+    '○ 8004-later: not walked', 'Measured walk time: 11 min',
+  ]) assert.ok(md.split('\n').includes(line), `${line}\n---\n${md}`);
+  // The walk's own report names the suite it was a plan of.
+  assert.match(cli('report', '8001-orders-1').stdout, /\n- \*\*Suite:\*\* release-1 \(plan 1 of 4\)\n/);
+
+  // Stopped on the screen between two plans, in Turkish.
+  const tr = suites.build({ ...suite, lang: 'tr', plans: [suite.plans[0], suite.plans[3]] }, id => ({ meta: store.readJson(path.join(store.walkDir(P, id), 'walk.json')), events: store.readEvents(P, id) })).markdown;
+  for (const line of ['# Smoke suite raporu — release-1', '2 plandan 1 tanesi koşuldu · ✔ 2 geçti · ✖ 1 farklı · ⏭ 0 atlandı · ○ 0 koşulmadı',
+    '■ Kullanıcı 8001-orders planından sonra durdurdu.', '○ Koşulmayan planlar: 8004-later.', '○ 8004-later: koşulmadı',
+    'Smoke suite release, test ortamı (2026-11-03, 1/2 plan; guided-smoke release-1)']) assert.ok(tr.split('\n').includes(line), `${line}\n---\n${tr}`);
 });
 
 test.after(() => fs.rmSync(home, { recursive: true, force: true }));

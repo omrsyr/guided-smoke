@@ -4,6 +4,7 @@
 //   <root>/runtime/                         playwright-core, installed once
 //   <root>/projects/<project>/plans/<plan>/steps.js
 //   <root>/projects/<project>/walks/<plan>-<n>/{walk.json, events.jsonl, report.md, steps.snapshot.js, screens/, downloads/}
+//   <root>/projects/<project>/suites/<suite>-<n>/{suite.json, report.md}   a folder of plans walked in one go
 //   <root>/profiles/<project>-<browser>/   browser profile (session cookies; no passwords)
 
 const fs = require('fs');
@@ -39,6 +40,8 @@ function walksDir(project, root) { return path.join(projectDir(project, root), '
 function planDir(project, planId, root) { return path.join(plansDir(project, root), planId); }
 function planFile(project, planId, root) { return path.join(planDir(project, planId, root), 'steps.js'); }
 function walkDir(project, walkId, root) { return path.join(walksDir(project, root), walkId); }
+function suitesDir(project, root) { return path.join(projectDir(project, root), 'suites'); }
+function suiteDir(project, suiteId, root) { return path.join(suitesDir(project, root), suiteId); }
 function profileDir(project, browser, root = dataRoot()) { return path.join(root, 'profiles', `${project}-${browser}`); }
 function runtimeDir(root = dataRoot()) { return path.join(root, 'runtime'); }
 
@@ -50,13 +53,24 @@ function listPlans(project, root) {
   return listDirs(plansDir(project, root)).filter(id => fs.existsSync(planFile(project, id, root))).sort();
 }
 
-/** Walk numbers of a plan, ascending. A walk id is "<plan>-<n>". */
-function walkNumbers(project, planId, root) {
-  const prefix = planId + '-';
-  return listDirs(walksDir(project, root))
+/** The numbers n of the folders "<name>-<n>" in a folder, ascending. */
+function numbered(dir, name) {
+  const prefix = name + '-';
+  return listDirs(dir)
     .filter(w => w.startsWith(prefix) && /^\d+$/.test(w.slice(prefix.length)))
     .map(w => Number(w.slice(prefix.length)))
     .sort((a, b) => a - b);
+}
+
+/** Walk numbers of a plan, ascending. A walk id is "<plan>-<n>". */
+function walkNumbers(project, planId, root) {
+  return numbered(walksDir(project, root), planId);
+}
+
+/** A suite's records are numbered as a plan's walks are: "<suite>-<n>", never reused. */
+function nextSuiteId(project, name, root) {
+  const nums = numbered(suitesDir(project, root), name);
+  return `${name}-${nums.length ? nums[nums.length - 1] + 1 : 1}`;
 }
 
 function nextWalkId(project, planId, root) {
@@ -149,6 +163,6 @@ function readEvents(project, walkId, root) {
 }
 
 module.exports = {
-  PLAN_ID, dataRoot, detectProject, safeName, projectDir, plansDir, walksDir, planDir, planFile, walkDir, profileDir, runtimeDir,
-  listPlans, walkNumbers, nextWalkId, latestWalkId, resolve, ResolveError, readJson, readEvents,
+  PLAN_ID, dataRoot, detectProject, safeName, projectDir, plansDir, walksDir, planDir, planFile, walkDir, suitesDir, suiteDir,
+  profileDir, runtimeDir, listPlans, walkNumbers, nextWalkId, latestWalkId, nextSuiteId, resolve, ResolveError, readJson, readEvents,
 };

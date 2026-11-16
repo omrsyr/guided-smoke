@@ -9,7 +9,7 @@ const probing = require('./probe');
 
 const LABELS = {
   en: {
-    title: 'Smoke report', plan: 'Plan', workItem: 'Work item', date: 'Date', measured: 'Measured walk time',
+    title: 'Smoke report', plan: 'Plan', suite: 'Suite', suiteAt: 'plan {i} of {n}', workItem: 'Work item', date: 'Date', measured: 'Measured walk time',
     measuredNote: 'sign-in wait excluded; your own extra checking is not included', browser: 'Browser', base: 'Address',
     result: 'Result', filter: 'Filter', summary: 'Summary', steps: 'Steps', step: 'Step', outcome: 'Result', auto: 'Automatic check',
     note: 'Note', shot: 'Screenshot', compare: 'Compared with', noChange: 'No change in results.', newStep: 'new step', wasStep: 'was step {n}', removedStep: 'no longer in the plan (was step {n})', paste: 'To paste into the work item',
@@ -51,7 +51,7 @@ const LABELS = {
     pasteUndo: '↩ Undo: {done}/{total} put back',
   },
   tr: {
-    title: 'Smoke raporu', plan: 'Plan', workItem: 'İş', date: 'Tarih', measured: 'Ölçülen koşu süresi',
+    title: 'Smoke raporu', plan: 'Plan', suite: 'Suite', suiteAt: 'plan {i}/{n}', workItem: 'İş', date: 'Tarih', measured: 'Ölçülen koşu süresi',
     measuredNote: 'giriş beklemesi hariç; senin ek incelemen dahil değil', browser: 'Tarayıcı', base: 'Adres',
     result: 'Sonuç', filter: 'Filtre', summary: 'Özet', steps: 'Adımlar', step: 'Adım', outcome: 'Sonuç', auto: 'Otomatik kontrol',
     note: 'Not', shot: 'Görüntü', compare: 'Önceki koşuyla fark', noChange: 'Sonuçlarda değişiklik yok.', newStep: 'yeni adım', wasStep: '{n}. adımdı', removedStep: 'artık planda yok ({n}. adımdı)', paste: 'İş kaydına yapıştırmak için',
@@ -179,6 +179,8 @@ function build(meta, events, prev) {
 
   lines.push(`# ${L.title} — ${meta.walkId}`, '');
   lines.push(`- **${L.plan}:** ${meta.planId}${meta.title && meta.title !== meta.planId ? ` — ${meta.title}` : ''}`);
+  // A walk that was one plan of a suite names it: the suite's own report holds the other plans.
+  if (meta.suite) lines.push(`- **${L.suite}:** ${meta.suite.id} (${L.suiteAt.replace('{i}', meta.suite.index).replace('{n}', meta.suite.total)})`);
   // "#6655" for a number (Azure DevOps, GitHub); a key such as PROJ-123 (Jira, Linear) as it is.
   if (meta.workItem) lines.push(`- **${L.workItem}:** ${/^\d+$/.test(String(meta.workItem)) ? '#' : ''}${meta.workItem}`);
   lines.push(`- **${L.date}:** ${start.day} ${start.time}${end ? '–' + end.time : ''}`);
@@ -426,4 +428,4 @@ function networkSection(meta, states, L, t) {
   return lines;
 }
 
-module.exports = { build, finalStates, counts, duration };
+module.exports = { build, finalStates, counts, duration, localTime, cell, oneLine };

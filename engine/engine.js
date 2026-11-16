@@ -682,11 +682,17 @@ function firstLine(error) {
  *                                fresh, screens:'diff'|'all'|null, locale, lang, keepDownloads, auto, trace, video,
  *                                panel: { side:'left'|'right', min }, network: compileConfig(plan.network)|null, probe,
  *                                env: name|null, start, data, db, signIn } — from envs.pickEnv
- *                                (default: the plan's own)
+ *                                (default: the plan's own);
+ *                                suite: { id, index, total, next: the next plan's title|null } when the walk is one
+ *                                plan of a suite
+ * @returns {{ meta, counts, signedOut, stopSuite }} stopSuite: the user ended the suite on the closing screen
  */
 async function walk(o) {
   const { plan, planId, walkId, project, walkDir, playwright, options } = o;
-  const t = texts(options.lang);
+  // A walk that is one plan of a suite says so in every panel's header: "Plan 2/5 · Smoke 3 / 9".
+  const suite = options.suite || null;
+  const words = texts(options.lang);
+  const t = suite ? { ...words, step: `${format(words.suitePlan, { i: suite.index, n: suite.total })} · ${words.step}` } : words;
   const steps = plan.steps;
   const total = steps.length;
   const base = options.base;
@@ -708,6 +714,7 @@ async function walk(o) {
 
   const meta = {
     walkId, planId, project, title: plan.title || planId, workItem: options.workItem || plan.workItem || null,
+    ...(suite ? { suite: { id: suite.id, index: suite.index, total: suite.total } } : {}),
     env: options.env || null, base, remote, signIn, browser: options.browser.name, browserSource: options.browser.source, lang: options.lang,
     locale: options.locale || null, pace: options.pace, fresh: !!options.fresh, screens: options.screens || null,
     filter: options.filterNote || null, skipWrites: !!options.skipWrites, allowRemoteWrites: !!options.allowRemoteWrites,
@@ -1558,24 +1565,33 @@ async function walk(o) {
     const undoFailed = undone.filter(u => u.error);
 
     // ---- closing screen ----
+    // In a suite with plans left it leads on to the next plan, or ends the suite here; the sign-out comes with the
+    // last plan. A stopped walk ends the suite anyway and closes as a walk of its own does.
+    const onward = !!(suite && suite.next && !stopped);
     const closing = closed ? { a: 'close' } : await ask({
       header: format(t.step, { n: total, total }), accent: COLORS.info, t, didLabel: t.did, expectLabel: t.outcome,
-      title: t.doneTitle, did: t.doneDid, shot: false,
+      title: onward ? format(t.suiteDoneTitle, { i: suite.index, n: suite.total }) : t.doneTitle,
+      did: onward ? format(t.suiteDoneDid, { title: suite.next }) : t.doneDid, shot: false,
       expect: [format(t.doneSummary, counts), ...(counts.auto ? [format(t.doneAuto, counts)] : []),
         ...(counts.against ? [format(t.doneAgainst, counts)] : []), ...(counts.errorSteps ? [format(t.doneErrors, counts)] : []),
         ...(counts.networkCritical ? [format(t.doneNetworkCritical, counts)] : counts.networkSteps ? [format(t.doneNetwork, counts)] : []),
         ...(counts.probeTries ? [format(t.doneProbe, counts)] : []),
         ...(undone.length ? [format(t.doneUndo, { done: undone.length - undoFailed.length, total: undone.length })] : []),
         ...undoFailed.map(u => format(t.doneUndoFailed, u))],
-      buttons: [
+      buttons: onward ? [
+        { label: t.suiteNext, value: 'close', color: COLORS.info },
+        { label: t.suiteStop, value: 'stop', color: COLORS.stop },
+      ] : [
         { label: t.close, value: 'close', color: COLORS.info },
         ...(options.fresh ? [] : [{ label: t.signOut, value: 'signout', color: COLORS.stop }]),
       ],
     }).catch(() => ({ a: 'close' }));
+    // Stop on that screen, or the window closed by then: the user is leaving, so no next plan opens a new window.
+    const stopSuite = !!suite && (closed || closing.a === 'stop');
     await closeBrowser();
     if (closing.a === 'signout') removeProfile();
     else dropFreshProfile();
-    return { meta, counts, signedOut: closing.a === 'signout' };
+    return { meta, counts, signedOut: closing.a === 'signout', stopSuite };
   } catch (e) {
     meta.endedAt = new Date().toISOString();
     if (meta.readyAt) meta.measuredSeconds = Math.round((Date.parse(meta.endedAt) - Date.parse(meta.readyAt)) / 1000);
