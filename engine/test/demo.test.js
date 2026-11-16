@@ -654,6 +654,35 @@ test('under an application path (an IIS application) the start page, goto, url a
   }
 });
 
+test('an environment sets the start page and the test records the steps read; the walk records its name', { skip, timeout: 60000 }, async () => {
+  const { pickEnv } = require('../envs');
+  const app = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(`<!doctype html><title>t</title><h1 id="page">${req.url.replace(/[<>&"]/g, '')}</h1>`);
+  });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const plan = {
+    id: 'envs', base: 'http://localhost:1', start: '/orders/1001', ready: '#page', data: { order: 1001, customer: 'C-1' },
+    envs: { test: { base: `http://127.0.0.1:${app.address().port}`, start: '/orders/2001', data: { order: 2001 } } },
+    steps: [{
+      title: 'Start page and data', did: 'x', expect: ['x'],
+      run: async ({ page, data, state }) => { state.seen = { path: new URL(page.url()).pathname, ...data }; },
+      check: async ({ state }) => [state.seen.path === '/orders/2001' && state.seen.order === 2001 && state.seen.customer === 'C-1', JSON.stringify(state.seen)],
+    }],
+  };
+  const env = pickEnv(plan, 'test');
+  try {
+    const { meta } = await autoWalk({ playwright, plan, browser: chosen, base: env.base, lang: 'en', walkDir, options: { env: env.name, start: env.start, data: env.data } });
+    assert.strictEqual(meta.env, 'test');
+    const [e] = readEvents(walkDir);
+    assert.ok(e.auto.ok, e.auto.text);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
 test('--auto passes only a step whose check passed, after a countdown the user can hold', { skip, timeout: 90000 }, async () => {
   const app = await server.start({ lang: 'en' });
   const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));

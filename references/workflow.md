@@ -34,7 +34,8 @@ Check, do not assume:
 - **The application runs the new code:** the running process started after the last change (compare the process start
   time with the last build or file change), or ask the user to restart it. An old process makes every step lie.
 - **Address:** the port the application listens on (process ports, launch settings). Pass it as `--base` or put it in
-  the plan.
+  the plan. For a shared test server, add it as an environment of the plan (`envs`, then `--env test`) with its own
+  test records in `data` ([writing steps](writing-steps.md) rule 19).
 - **Database / migrations:** if the project uses manual migration scripts and the branch (or a pull) brought new ones,
   check read-only whether their objects exist on the target database. Missing scripts are the user's call to run.
 - **Test data:** find suitable records read-only (an entity in the right state, enough free capacity, an account).

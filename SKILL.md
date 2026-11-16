@@ -59,6 +59,7 @@ Flags (order free; unknown flags and bad values are refused with a clear message
 |---|---|
 | `--browser chrome\|edge` | Force a browser (default: the system's default browser when it is Chrome or Edge, else Chrome, else Edge) |
 | `--base <url>` | Address of the application (default: the plan's `base`; detect the running app's port when writing the plan). It may carry the application's path (`https://test01/App`): the plan's paths are read under it |
+| `--env <name>` | Walk in one of the plan's environments (`envs`: a shared test server with its own address, start page and test records). The report names it and compares only with walks in the same environment |
 | `--pace slow\|normal\|fast` | Browser speed (default `slow`) |
 | `--from <n>` / `--only <n,m,a-b>` / `--retry-failed` | Run part of a plan (one of the three). `--retry-failed` reruns the steps marked ✖ in the given or latest walk |
 | `--skip-writes` | Skip every permitted (approve) step without asking |
@@ -84,7 +85,8 @@ node run.js doctor                    data folder, project, chosen browser, runt
 node run.js setup                     install playwright-core once (asks npm; get the user's OK first)
 node run.js setup --video             also fetch Playwright's ffmpeg for --video (about 4 MB; get the user's OK first)
 node run.js init <plan-id> [--title T] [--work-item N]   create plans/<plan-id>/steps.js from the template
-node run.js run <ref|file.js> [flags] run a walk (start it in the background and wait for it to finish); a file is
+node run.js run <ref|file.js> [--env <name>] [flags]
+                                      run a walk (start it in the background and wait for it to finish); a file is
                                       linked into the plans, --force replaces another plan with the same id
 node run.js demo [flags]              start the demo application and walk its plan (same flags as run, except
                                       --base, --work-item, --allow-remote-writes, --force); walks are kept under

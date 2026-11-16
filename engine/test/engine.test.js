@@ -15,6 +15,7 @@ const errors = require('../errors');
 const network = require('../network');
 const probing = require('../probe');
 const { texts } = require('../i18n');
+const { checkEnvs, pickEnv } = require('../envs');
 const { appUrl, isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
 const RUN = path.join(__dirname, '..', 'run.js');
 const P = 'demo';
@@ -94,6 +95,63 @@ test('a step with a key the engine does not know is refused before a browser ope
   assert.strictEqual(r.status, 2);
   assert.match(r.stderr, /step 2 \("b"\) has an unknown key "skipIf"\. A step knows: title, did, expect, run, check, approve, skipTo, probe\./);
   assert.ok(!fs.existsSync(store.walkDir(P, `${id}-1`)), 'no walk was started');
+});
+
+test('environments: the plan is its own, envs override base, start and data, and mistakes are named', () => {
+  const plan = { base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' },
+    envs: { test: { base: 'https://test01/App', data: { order: 2001 } }, uat: { start: '/home' } } };
+  assert.strictEqual(checkEnvs(plan), null);
+  assert.deepStrictEqual(pickEnv(plan, undefined), { name: null, base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' } });
+  assert.deepStrictEqual(pickEnv(plan, 'test'), { name: 'test', base: 'https://test01/App', start: '/orders/1001', data: { order: 2001, user: 'smoke' } });
+  assert.deepStrictEqual(pickEnv(plan, 'uat'), { name: 'uat', base: 'https://localhost:5001', start: '/home', data: { order: 1001, user: 'smoke' } });
+  assert.deepStrictEqual(pickEnv({ steps: [] }, undefined), { name: null, base: null, start: '/', data: {} });
+  assert.throws(() => pickEnv(plan, 'prod'), /no environment "prod"\. Its environments: test, uat\./);
+  assert.throws(() => pickEnv({}, 'test'), /has no environments/);
+  for (const [bad, msg] of [
+    [{ envs: {} }, /at least one environment/],
+    [{ envs: { test: { base: 'test01' } } }, /envs\.test: base "test01" is not a URL/],
+    [{ envs: { test: { url: 'https://x' } } }, /envs\.test has an unknown key "url"\. An environment knows: base, start, data\./],
+    [{ envs: { test: { data: [1] } } }, /envs\.test: data must be an object/],
+    [{ envs: { 'te st': {} } }, /not a usable name/],
+    [{ data: 'x' }, /the plan: data must be an object/],
+  ]) assert.match(String(checkEnvs(bad)), msg);
+});
+
+test('--env is checked before a browser opens: an unknown environment, one without an address, a mistake in envs', () => {
+  const id = '7004-envs';
+  fs.mkdirSync(store.planDir(P, id), { recursive: true });
+  fs.writeFileSync(store.planFile(P, id), "module.exports = { envs: { test: { data: { order: 1 } } }, steps: [{ title: 'a', run: async () => {} }] };");
+  const unknown = cli('run', id, '--env', 'prod');
+  assert.strictEqual(unknown.status, 2);
+  assert.match(unknown.stderr, /no environment "prod"\. Its environments: test\./);
+  const noBase = cli('run', id, '--env', 'test');
+  assert.strictEqual(noBase.status, 2);
+  assert.match(noBase.stderr, /No address: .* or in envs\.test\./);
+  fs.writeFileSync(store.planFile(P, id), "module.exports = { envs: { test: { bas: 'https://x' } }, steps: [{ title: 'a', run: async () => {} }] };");
+  assert.match(cli('run', id).stderr, /envs\.test has an unknown key "bas"/);
+  assert.strictEqual(cli('demo', '--env', 'test').status, 2, 'the demo has no environments');
+  assert.ok(!fs.existsSync(store.walkDir(P, `${id}-1`)), 'no walk was started');
+});
+
+test('a walk is compared with, and --retry-failed reruns, walks in its own environment only', () => {
+  const id = '7005-env-compare';
+  fs.mkdirSync(store.planDir(P, id), { recursive: true });
+  fs.writeFileSync(store.planFile(P, id), "module.exports = { base: 'http://localhost:1', envs: { test: { base: 'http://localhost:2' } }, steps: ['one', 'two', 'three'].map(title => ({ title, run: async () => {} })) };");
+  const answers = list => list.map((answer, i) => ({ n: i + 1, title: ['one', 'two', 'three'][i], answer }));
+  walk(`${id}-1`, { env: 'test' }, answers(['pass', 'diff', 'pass']));
+  walk(`${id}-2`, {}, answers(['diff', 'pass', 'pass']));
+  walk(`${id}-3`, { env: 'test' }, answers(['pass', 'pass', 'pass']));
+  const r = cli('report', `${id}-3`);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /\*\*Environment:\*\* test\n/);
+  assert.match(r.stdout, /## Compared with \(7005-env-compare-1\)\n\n- 2\. two: ✖ → ✔\n\n/, 'walk 2 ran on this machine: left out');
+  assert.match(r.stdout, /\nSmoke on test \(2026-11-03, 3\/3; guided-smoke 7005-env-compare-3\)\n/);
+  // The newest walk on test passed everything; walk 2's ✖ on this machine is not retried there.
+  const retry = cli('run', id, '--env', 'test', '--retry-failed');
+  assert.strictEqual(retry.status, 0, retry.stderr);
+  assert.match(retry.stdout, /Walk 7005-env-compare-3 has no steps marked different/);
+  assert.match(cli('list').stdout, /7005-env-compare-3 .* \[test\]\n/);
+  assert.doesNotMatch(cli('report', `${id}-2`).stdout, /Environment:|Compared with/, 'the plan\'s own environment: no line, nothing to compare');
 });
 
 test('only loopback addresses count as local', () => {

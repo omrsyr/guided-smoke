@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Environments: one plan walks on this machine and on a shared test server.** A plan's `envs` names other
+  environments (`envs: { test: { base: 'https://test01/App', start: '/orders/2001', data: { order: 2001 } } }`), and
+  `--env test` picks one. The plan's own `base`, `start` and `data` are its default environment; an environment
+  overrides what it gives, and its `data` is laid over the plan's key by key. Steps read the test records as
+  `ctx.data`. A mistake in `envs` (an unknown key, a `base` that is no URL) and an unknown `--env` are refused before
+  the browser opens, naming what exists.
+  - The walk records the environment: the report names it, its paste block reads "Smoke on test (…)", and `list`
+    marks the walk `[test]`.
+  - A report compares a walk only with earlier walks in the same environment, and `--retry-failed` reruns the ✖ steps
+    of the newest walk there: a test server's records and version are not a developer machine's.
+
 ## 1.4.2 — 2026-11-16
 
 - **A `base` with an application path keeps it.** Under an IIS application (`https://test01/App`) the plan's paths

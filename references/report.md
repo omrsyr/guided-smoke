@@ -4,8 +4,8 @@
 rebuilds it. It contains:
 
 - **Header:** walk id, plan, work item, date and time, **measured walk time** (from the start page being ready to the
-  last answer; sign-in wait excluded), browser, address, result (completed / stopped / error), filter, and links to
-  the recordings of `--trace` / `--video` with a reminder to keep them on this machine.
+  last answer; sign-in wait excluded), browser, the environment (with `--env`), address, result (completed / stopped /
+  error), filter, and links to the recordings of `--trace` / `--video` with a reminder to keep them on this machine.
 - **Summary:** ✔ passed · ✖ different · ⏭ skipped · ○ not run, and the steps passed although their automatic check
   failed (also flagged in the note column and in the paste block). Mention them to the user; they still count as
   passed, since the user has the last word. With `--auto`, how many passed steps went on by themselves; those steps
@@ -27,12 +27,13 @@ rebuilds it. It contains:
   server; an assumed expectation that differs is doubted first. The summary counts tries and differing rows; the note
   column says "🧪 10/11 as expected"; the paste block lists only the rows that differ. A probe step skipped without
   `--probe` reads "runs with --probe" and stays out of the comparison and the paste block.
-- **Compared with earlier walks** of the same plan: every step whose result changed (`✖ → ✔`), each against the newest
+- **Compared with earlier walks** of the same plan in the same environment (a walk on the test server is not compared
+  with one on this machine): every step whose result changed (`✖ → ✔`), each against the newest
   earlier walk in which that step was answered ✔ or ✖, so a walk stopped early or a `--retry-failed` walk adds no
   noise. The heading names the walks compared with, and with several each line names its own. Steps are matched by
   title: a new step reads "new step", a moved step names its old number, a step no longer in the plan is listed.
 - **To paste into the work item:** a plain-text block with the ✔/✖ list (with the browser's error count per step) and
-  the measured time.
+  the measured time; its first line names the environment ("Smoke on test (…)").
 
 ## What to tell the user afterwards
 

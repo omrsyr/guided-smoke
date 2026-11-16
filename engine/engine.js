@@ -577,7 +577,9 @@ function firstLine(error) {
  * @param {object} o.playwright playwright-core
  * @param {object} o.options    { browser, base, pace, allowed:Set|null, filterNote, skipWrites, allowRemoteWrites, workItem,
  *                                fresh, screens:'diff'|'all'|null, locale, lang, keepDownloads, auto, trace, video,
- *                                panel: { side:'left'|'right', min }, network: compileConfig(plan.network)|null, probe }
+ *                                panel: { side:'left'|'right', min }, network: compileConfig(plan.network)|null, probe,
+ *                                env: name|null, start, data } — env, start and data from envs.pickEnv (default: the
+ *                                plan's own)
  */
 async function walk(o) {
   const { plan, planId, walkId, project, walkDir, playwright, options } = o;
@@ -602,7 +604,7 @@ async function walk(o) {
 
   const meta = {
     walkId, planId, project, title: plan.title || planId, workItem: options.workItem || plan.workItem || null,
-    base, remote, browser: options.browser.name, browserSource: options.browser.source, lang: options.lang,
+    env: options.env || null, base, remote, browser: options.browser.name, browserSource: options.browser.source, lang: options.lang,
     locale: options.locale || null, pace: options.pace, fresh: !!options.fresh, screens: options.screens || null,
     filter: options.filterNote || null, skipWrites: !!options.skipWrites, allowRemoteWrites: !!options.allowRemoteWrites,
     auto: !!options.auto, trace: !!options.trace, video: !!options.video, probe: !!options.probe, traces: [], videos: [],
@@ -1103,6 +1105,8 @@ async function walk(o) {
 
   const ctx = {
     page, context, base, lang: options.lang, state: {}, walkDir,
+    // The environment's test records (envs.<name>.data over the plan's data).
+    data: options.data || { ...(plan.data || {}) },
     url: p => appUrl(base, p),
     goto: async p => { await page.goto(appUrl(base, p)); await page.waitForLoadState('load'); },
     mark,
@@ -1144,7 +1148,7 @@ async function walk(o) {
   let currentStep = null;
   try {
     // ---- sign-in: always the user's; the script only waits until the browser leaves the sign-in pages ----
-    const start = plan.start || '/';
+    const start = options.start || plan.start || '/';
     const loginRe = plan.login ? new RegExp(plan.login, 'i') : DEFAULT_LOGIN;
     const isReady = async () => plan.ready ? (await page.locator(plan.ready).count()) > 0 : !loginRe.test(page.url());
     const deadline = Date.now() + LOGIN_TIMEOUT_MS;

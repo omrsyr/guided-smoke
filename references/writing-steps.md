@@ -15,6 +15,10 @@ module.exports = {
   locale: 'en-US',                  // optional browser locale
   ignoreErrors: ['GET /hub/negotiate → 404'],   // optional: known browser noise (see rule 16)
   network: { slowMs: 1000, origins: ['https://api.example.com'], ignore: ['/hub/'] },   // optional, for --network (rule 17)
+  data: { order: 1001 },            // optional: the test records the steps use (ctx.data)
+  envs: {                           // optional: other environments, picked with --env (rule 19)
+    test: { base: 'https://test01/Orders', start: '/orders/2001', data: { order: 2001 } },
+  },
   steps: [ /* … */ ],
 };
 ```
@@ -47,6 +51,7 @@ The step context (`ctx`) offers:
 | `poll(fn, { until, timeout, interval })` | Call `fn` until `until(value)` holds (default: truthy) or `timeout` ms pass (default 30000, every 1000); returns the last value |
 | `probe({ field, submit, saved, message, values })` | Send one field's form once per value and sort what happened; only in a step marked `probe: true` (rule 18, [probing](probing.md)) |
 | `state` | An object shared by all steps of the walk |
+| `data` | The environment's test records: the plan's `data` with the chosen environment's laid over it (rule 19) |
 | `url(path)` | The full address of a path of the application, read as `goto` reads it |
 | `sleep(ms)`, `log(msg)`, `walkDir` | — |
 
@@ -125,3 +130,11 @@ For an API that needs the user's account, the project's database tool, or a back
     `probe()` sends one field's form with every value the user approved in the plan, each with its expectation and
     where that comes from. Put probe steps after the happy path, end with a probe clean-up step, and see
     [probing](probing.md) for the catalog, the expectations and what a try leads to.
+19. **Environments (`envs`, `--env`).** One plan walks on this machine and on a shared test server. The plan's own
+    `base`, `start` and `data` are its default environment; `envs` names others, each overriding what it gives (an
+    environment without `base` keeps the plan's, its `data` is laid over the plan's key by key). `--env test` picks
+    one; `--base` still overrides the address. Steps take record ids from `data` (`goto(`/orders/${data.order}`)`),
+    never from constants, since a test server's records are not the developer machine's. Several plans share their
+    environments with a module of their own: `envs: require('../envs')`. The walk records the environment's name; its
+    report names it and compares only with earlier walks in the same environment, and `--retry-failed` reruns the ✖
+    steps of the newest walk there. The remote-address rule for permitted steps is unchanged.

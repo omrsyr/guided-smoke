@@ -5,7 +5,7 @@
 //   node run.js setup [--video]                        install playwright-core into the data folder (once); --video adds ffmpeg
 //   node run.js doctor                                 data folder, project, browser, runtime
 //   node run.js init <plan-id> [--title T] [--work-item N] [--force]
-//   node run.js run <plan|walk|work-item|file.js> [flags] [--force]
+//   node run.js run <plan|walk|work-item|file.js> [--env <name>] [flags] [--force]
 //   node run.js demo [flags]                           walk the demo plan against the built-in demo application
 //   node run.js list
 //   node run.js report <plan|walk|work-item>
@@ -22,6 +22,7 @@ const report = require('./report');
 const { pickLanguage, systemLocale, LANGUAGES } = require('./i18n');
 const { compileIgnore } = require('./errors');
 const { compileConfig } = require('./network');
+const { checkEnvs, pickEnv } = require('./envs');
 
 const PLAYWRIGHT_VERSION = '1.63.0';
 // The floor of that playwright-core: below it, loading it ends the process with its own message.
@@ -42,7 +43,7 @@ const FLAGS = {
     browser: 'value', base: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool',
     'skip-writes': 'bool', 'allow-remote-writes': 'bool', 'work-item': 'value', fresh: 'bool', screens: 'value',
     locale: 'value', lang: 'value', 'keep-downloads': 'bool', force: 'bool', auto: 'bool', trace: 'bool', video: 'bool',
-    panel: 'value', network: 'bool', probe: 'bool',
+    panel: 'value', network: 'bool', probe: 'bool', env: 'value',
   },
   demo: {
     browser: 'value', pace: 'value', from: 'value', only: 'value', 'retry-failed': 'bool', 'skip-writes': 'bool',
@@ -159,6 +160,8 @@ function loadPlan(file) {
     if (s.skipTo && !s.approve && !s.probe) throw new UsageError(`${file}: step ${i + 1} uses skipTo without approve.`);
   });
   try { compileIgnore(plan.ignoreErrors); compileConfig(plan.network); } catch (e) { throw new UsageError(`${file}: ${e.message}`); }
+  const envError = checkEnvs(plan);
+  if (envError) throw new UsageError(`${file}: ${envError}`);
   return plan;
 }
 
@@ -195,20 +198,32 @@ function walkSummary(project, walkId) {
   const meta = store.readJson(path.join(store.walkDir(project, walkId), 'walk.json'), null);
   if (!meta) return null;
   const c = report.counts(meta, report.finalStates(store.readEvents(project, walkId)));
-  return { walkId, result: meta.result, startedAt: meta.startedAt, measuredSeconds: meta.measuredSeconds, ...c };
+  return { walkId, env: meta.env || null, result: meta.result, startedAt: meta.startedAt, measuredSeconds: meta.measuredSeconds, ...c };
+}
+
+/** The newest walk of a plan in an environment (null: the plan's own), or null. */
+function latestWalkIn(project, planId, env) {
+  for (const n of store.walkNumbers(project, planId).reverse()) {
+    const id = `${planId}-${n}`;
+    const meta = store.readJson(path.join(store.walkDir(project, id), 'walk.json'));
+    if (meta && (meta.env || null) === env) return id;
+  }
+  return null;
 }
 
 function writeReport(project, planId, walkId) {
   const dir = store.walkDir(project, walkId);
   const meta = store.readJson(path.join(dir, 'walk.json'));
   if (!meta) throw new Error(`Walk ${walkId} has no walk.json.`);
-  // The earlier walks, newest first: each step is compared with the walk in which it was last answered.
+  // The earlier walks in the same environment, newest first: each step is compared with the walk in which it was last
+  // answered. A test server's data and version are not a developer machine's, so walks elsewhere are left out.
   const n = Number(walkId.slice(planId.length + 1));
-  const earlier = store.walkNumbers(project, planId).filter(x => x < n).reverse().slice(0, EARLIER_WALKS).map(x => {
+  const env = meta.env || null;
+  const earlier = store.walkNumbers(project, planId).filter(x => x < n).reverse().map(x => {
     const id = `${planId}-${x}`;
     const m = store.readJson(path.join(store.walkDir(project, id), 'walk.json'));
-    return m && { meta: m, events: store.readEvents(project, id) };
-  }).filter(Boolean);
+    return m && (m.env || null) === env ? { id, meta: m } : null;
+  }).filter(Boolean).slice(0, EARLIER_WALKS).map(w => ({ meta: w.meta, events: store.readEvents(project, w.id) }));
   const { markdown, counts, against, errorSteps, networkSteps, probeSteps } = report.build(meta, store.readEvents(project, walkId), earlier.length ? earlier : null);
   const file = path.join(dir, 'report.md');
   fs.writeFileSync(file, markdown);
@@ -275,7 +290,7 @@ async function main() {
     }));
     const text = plans.length === 0 ? `No plans for project "${project}" (${store.plansDir(project)}).` : plans.map(p => [
       p.planId,
-      ...(p.walks.length ? p.walks.map(w => `  ${w.walkId}  ${(w.startedAt || '').slice(0, 16).replace('T', ' ')}  ${w.result}  ✔${w.pass} ✖${w.diff} ⏭${w.skip} ○${w.none}`) : ['  (no walks yet)']),
+      ...(p.walks.length ? p.walks.map(w => `  ${w.walkId}  ${(w.startedAt || '').slice(0, 16).replace('T', ' ')}  ${w.result}  ✔${w.pass} ✖${w.diff} ⏭${w.skip} ○${w.none}${w.env ? `  [${w.env}]` : ''}`) : ['  (no walks yet)']),
     ].join('\n')).join('\n');
     out(flags, { project, plans }, text);
     return EXIT.ok;
@@ -367,6 +382,8 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
   const source = planSource(planPath);
   const plan = loadPlan(source);
   const total = plan.steps.length;
+  let env;
+  try { env = pickEnv(plan, flags.env); } catch (e) { throw new UsageError(e.message); }
 
   const filters = ['from', 'only', 'retry-failed'].filter(f => flags[f]);
   if (filters.length > 1) throw new UsageError(`Use only one of --from, --only, --retry-failed (got ${filters.map(f => '--' + f).join(', ')}).`);
@@ -381,8 +398,9 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
     allowed = parseNumbers(flags.only, total, 'only');
     filterNote = `--only ${[...allowed].join(',')}`;
   } else if (flags['retry-failed']) {
-    const src = sourceWalk || store.latestWalkId(project, planId);
-    if (!src) throw Object.assign(new Error(`Plan ${planId} has no walk to retry.`), { exit: EXIT.resolve });
+    // The newest walk in this environment: what failed on a test server is not what failed on this machine.
+    const src = sourceWalk || latestWalkIn(project, planId, env.name);
+    if (!src) throw Object.assign(new Error(`Plan ${planId} has no walk${env.name ? ` in environment ${env.name}` : ''} to retry.`), { exit: EXIT.resolve });
     const failed = [...report.finalStates(store.readEvents(project, src)).values()].filter(e => e.answer === 'diff').map(e => e.n);
     if (failed.length === 0) { console.log(`Walk ${src} has no steps marked different; nothing to retry.`); return EXIT.ok; }
     allowed = new Set(failed);
@@ -399,8 +417,8 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
   if (flags.lang && !LANGUAGES.includes(flags.lang)) throw new UsageError(`--lang must be one of: ${LANGUAGES.join(', ')}.`);
   if (flags.locale && !/^[a-z]{2}(-[A-Z]{2})?$/.test(flags.locale)) throw new UsageError('--locale looks like tr-TR or en-US.');
   const panel = parsePanel(flags.panel);
-  const base = flags.base || plan.base;
-  if (!base) throw new UsageError('No address: pass --base https://host:port or set base in the plan.');
+  const base = flags.base || env.base;
+  if (!base) throw new UsageError(`No address: pass --base https://host:port or set base in the plan${env.name ? ` or in envs.${env.name}` : ''}.`);
   try { new URL(base); } catch { throw new UsageError(`--base "${base}" is not a URL.`); }
 
   const chosen = browser.choose(flags.browser);
@@ -413,7 +431,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
   const walkDir = store.walkDir(project, walkId);
   fs.mkdirSync(walkDir, { recursive: true });
   fs.copyFileSync(source, path.join(walkDir, 'steps.snapshot.js'));
-  console.log(`walk ${walkId} · ${chosen.name} (${chosen.source}) · ${base}${filterNote ? ' · ' + filterNote : ''}`);
+  console.log(`walk ${walkId} · ${chosen.name} (${chosen.source}) · ${base}${env.name ? ` · env ${env.name}` : ''}${filterNote ? ' · ' + filterNote : ''}`);
 
   const { walk } = require('./engine');
   try {
@@ -426,6 +444,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
         lang: pickLanguage(flags.lang || plan.lang), keepDownloads: !!flags['keep-downloads'],
         auto: !!flags.auto, trace: !!flags.trace, video: !!flags.video, panel,
         network: flags.network ? compileConfig(plan.network) : null, probe: !!flags.probe,
+        env: env.name, start: env.start, data: env.data,
       },
     });
   } catch (e) {
