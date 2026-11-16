@@ -114,8 +114,8 @@ const tx = (en, tr) => (lang === 'tr' ? tr : en);
 
 // Runs in the page (inPage): signs in with the box's account, then calls the check. Returns only what the product
 // branches on: HTTP status, status and message.
-const callApi = async ({ fields, arg }) => {
-  const post = (url, body, token) => fetch(url, { method: 'POST', body: JSON.stringify(body),
+const callApi = async ({ fields, arg, url }) => {
+  const post = (path, body, token) => fetch(url(path), { method: 'POST', body: JSON.stringify(body),
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) } });
   const password = arg.wrongPassword ? fields.password + 'x' : fields.password;
   const login = await post('/api/login', { email: fields.email, password });

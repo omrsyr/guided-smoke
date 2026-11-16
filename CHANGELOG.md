@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **A `base` with an application path keeps it.** Under an IIS application (`https://test01/App`) the plan's paths
+  went to the server's root: `goto('/orders')` opened `https://test01/orders`, and the start page `/` opened the
+  server's root, so the walk waited for a sign-in that never came. Paths are now read under `base`'s own path, and a
+  full address is opened as it is. A plan written for `https://localhost:5001` walks unchanged on
+  `https://test01/App`; a plan whose paths already repeat the application path (`/App/orders`) drops it.
+  - In `inPage`, the plan's function also gets `url(path)`: `fetch(url('/api/login'))` calls `/App/api/login`. A
+    bare `fetch('/api/login')` still goes to the server's root; the patterns and the demo now use `url()`.
+- **A step with a key the engine does not know is refused** before the browser opens, naming the key and the keys a
+  step knows. A `skipIf` written into a plan used to be passed over in silence.
+- Probing: the clean-up matches the test records' prefix ignoring case, since an application may store
+  `smoke-p3 …`; the demo's clean-up does so too.
+
 ## 1.4.1 — 2026-11-16
 
 - **`--network` reads a repeated call as the page repeating itself, not as a timer or a new action.** Two field

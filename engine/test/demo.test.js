@@ -4,6 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const store = require('../store');
@@ -608,6 +609,47 @@ test('a value box gone from the page is drawn again and waited for', { skip, tim
     assert.ok(e.auto.ok, e.auto.text);
   } finally {
     await app.close();
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+test('under an application path (an IIS application) the start page, goto, url and inPage\'s url keep the path', { skip, timeout: 60000 }, async () => {
+  // The application lives under /app/; the server's root is another application.
+  const asked = [];
+  const app = http.createServer((req, res) => {
+    asked.push(req.url);
+    if (req.url === '/app/api/ping') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); return; }
+    const inside = req.url.startsWith('/app/');
+    res.writeHead(inside ? 200 : 404, { 'Content-Type': 'text/html' });
+    res.end(`<!doctype html><title>t</title><h1 id="${inside ? 'app' : 'root'}">${inside ? 'app' : 'root'}</h1>`);
+  });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${app.address().port}/app`;
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const where = page => { const u = new URL(page.url()); return u.pathname + u.search; };
+  const plan = {
+    id: 'sub-path', ready: '#app',
+    steps: [
+      { title: 'Start page', did: 'x', expect: ['x'], run: async ({ page, state }) => { state.start = where(page); },
+        check: async ({ state }) => [state.start === '/app/', state.start] },
+      { title: 'goto and url', did: 'x', expect: ['x'], run: async ({ page, goto, url, state }) => {
+        await goto('/orders?id=5');
+        state.goto = where(page);
+        state.url = url('orders');
+      }, check: async ({ state }) => [state.goto === '/app/orders?id=5' && state.url === `${base}/orders`, `${state.goto} ${state.url}`] },
+      { title: 'A call from the page', did: 'x', expect: ['x'], run: async ({ inPage, state }) => {
+        state.call = await inPage(async ({ url }) => { const r = await fetch(url('/api/ping')); return { path: url('/api/ping'), status: r.status }; });
+      }, check: async ({ state }) => [state.call.path === '/app/api/ping' && state.call.status === 200, JSON.stringify(state.call)] },
+    ],
+  };
+  try {
+    await autoWalk({ playwright, plan, browser: chosen, base, lang: 'en', walkDir });
+    const events = readEvents(walkDir);
+    assert.strictEqual(events.length, 3);
+    for (const e of events) assert.ok(e.auto.ok, `${e.title}: ${e.auto.text}`);
+    assert.ok(!asked.some(u => !u.startsWith('/app/') && u !== '/favicon.ico'), `asked outside the application: ${asked.join(' ')}`);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
     fs.rmSync(walkDir, { recursive: true, force: true });
   }
 });

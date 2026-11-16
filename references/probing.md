@@ -85,8 +85,9 @@ application's own "already sent" answer.
 - **Test records.** A value that may be saved starts with a prefix the clean-up can find (`SMOKE-P1 …`, filled up to
   the length the value is about). A value meant to be refused needs none.
 - **Clean-up.** End with a permitted step marked `probe: true` that deletes what the probe saved, by the prefix, and
-  checks the count against `saved.length`. An edit form's probe leaves the record's last saved value: put the original
-  back there too. See [patterns](patterns.md#reading-and-writing-the-database).
+  checks the count against `saved.length`. Match the prefix ignoring case: the application may store a value in lower
+  case (`smoke-p3 …`), and a case-sensitive match then leaves that record behind. An edit form's probe leaves the
+  record's last saved value: put the original back there too. See [patterns](patterns.md#reading-and-writing-the-database).
 
 ## What a try leads to
 

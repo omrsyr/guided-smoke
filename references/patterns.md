@@ -25,8 +25,8 @@ the account into a box on the page and the call runs inside the page. The script
   did: 'I signed in with the box\'s account and called POST /api/check for machine SMOKE-A.',
   expect: ['The box shows http 200 and status "Valid".'],
   run: async ({ inPage, state }) => {
-    state.r = await inPage(async ({ fields, arg }) => {
-      const post = (url, body, token) => fetch(url, { method: 'POST', body: JSON.stringify(body),
+    state.r = await inPage(async ({ fields, arg, url }) => {
+      const post = (path, body, token) => fetch(url(path), { method: 'POST', body: JSON.stringify(body),
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) } });
       const login = await (await post('/api/login', { email: fields.email, password: fields.password })).json();
       if (!login.token) return { error: 'Sign-in refused: check the e-mail and password in the box.' };
@@ -51,6 +51,9 @@ the account into a box on the page and the call runs inside the page. The script
   the box is on the page. **■ Stop** during that wait ends the walk at once: from then on the page sends no
   request and every helper refuses, even if the plan catches the error.
 - Calls go to the page's own origin. Another origin needs the application's CORS and CSP to allow it.
+- `url(path)` turns a path of the application into the path to call, keeping `base`'s own path: under an IIS
+  application (`https://test01/App`) `url('/api/login')` is `/App/api/login`. A bare `fetch('/api/login')` would go
+  to the server's root and miss the application there.
 
 ## Reading and writing the database
 

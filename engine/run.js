@@ -139,12 +139,20 @@ function planSource(planPath) {
   return target;
 }
 
+// What a step may say. Anything else is a mistake the engine would otherwise pass over in silence (a skipIf that never
+// skips), so it is refused like an unknown flag.
+const STEP_KEYS = ['title', 'did', 'expect', 'run', 'check', 'approve', 'skipTo', 'probe'];
+
 function loadPlan(file) {
   delete require.cache[require.resolve(file)];
   const plan = require(file);
   if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) throw new UsageError(`${file}: "steps" must be a non-empty array.`);
   plan.steps.forEach((s, i) => {
     if (!s || !s.title) throw new UsageError(`${file}: step ${i + 1} has no title.`);
+    const unknown = Object.keys(s).filter(k => !STEP_KEYS.includes(k));
+    if (unknown.length) {
+      throw new UsageError(`${file}: step ${i + 1} ("${s.title}") has ${unknown.length > 1 ? 'unknown keys' : 'an unknown key'} ${unknown.map(k => `"${k}"`).join(', ')}. A step knows: ${STEP_KEYS.join(', ')}.`);
+    }
     if (typeof s.run !== 'function') throw new UsageError(`${file}: step ${i + 1} ("${s.title}") has no run function.`);
     if (s.check && typeof s.check !== 'function') throw new UsageError(`${file}: step ${i + 1} check must be a function.`);
     if (s.probe !== undefined && typeof s.probe !== 'boolean') throw new UsageError(`${file}: step ${i + 1} probe must be true or false.`);

@@ -15,7 +15,7 @@ const errors = require('../errors');
 const network = require('../network');
 const probing = require('../probe');
 const { texts } = require('../i18n');
-const { isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
+const { appUrl, isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
 const RUN = path.join(__dirname, '..', 'run.js');
 const P = 'demo';
 
@@ -70,6 +70,30 @@ test('walks are numbered after the highest existing one and never reused', () =>
   assert.strictEqual(store.nextWalkId(P, '6655-machine-expiry'), '6655-machine-expiry-3');
   assert.strictEqual(store.latestWalkId(P, '6655-machine-expiry'), '6655-machine-expiry-2');
   assert.strictEqual(store.nextWalkId(P, 'login-flow'), 'login-flow-1');
+});
+
+test('a path is read under base\'s own path (an IIS application), a full address as it is', () => {
+  const app = 'https://test01/App';
+  for (const [p, want] of [['/orders', '/App/orders'], ['orders', '/App/orders'], ['/', '/App/'], ['', '/App/'],
+    ['/orders?id=5#notes', '/App/orders?id=5#notes'], ['//other/x', null], ['https://elsewhere/x', null]]) {
+    const full = want ? `https://test01${want}` : new URL(p, app).toString();
+    assert.strictEqual(appUrl(app, p), full, p);
+    assert.strictEqual(appUrl(`${app}/`, p), full, `${p} under a base ending in /`);
+    assert.strictEqual(appUrl(app, p, true), want || p, `${p}, path only`);
+  }
+  // Without a path of its own, base reads as before.
+  assert.strictEqual(appUrl('https://localhost:5001', '/orders/7'), 'https://localhost:5001/orders/7');
+  assert.strictEqual(appUrl('https://localhost:5001', '/'), 'https://localhost:5001/');
+});
+
+test('a step with a key the engine does not know is refused before a browser opens', () => {
+  const id = '7003-unknown-key';
+  fs.mkdirSync(store.planDir(P, id), { recursive: true });
+  fs.writeFileSync(store.planFile(P, id), "module.exports = { base: 'http://localhost:1', steps: [{ title: 'a', run: async () => {} }, { title: 'b', skipIf: () => true, run: async () => {} }] };");
+  const r = cli('run', id);
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /step 2 \("b"\) has an unknown key "skipIf"\. A step knows: title, did, expect, run, check, approve, skipTo, probe\./);
+  assert.ok(!fs.existsSync(store.walkDir(P, `${id}-1`)), 'no walk was started');
 });
 
 test('only loopback addresses count as local', () => {

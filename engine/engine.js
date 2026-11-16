@@ -438,8 +438,9 @@ function redact(value, secrets) {
 }
 
 // Runs in the page (composed into one expression by inPage): reads the box, calls the plan's function, masks the box's
-// values in its result or error, and shows the masked result in the box. Only the masked value leaves the page.
-async function boxRun(fn, arg, o, mask) {
+// values in its result or error, and shows the masked result in the box. Only the masked value leaves the page. The
+// plan's function also gets url(): a path of the application, as goto() reads it, for its own calls.
+async function boxRun(fn, arg, o, mask, join) {
   const box = document.getElementById('__guided_smoke_box');
   const fields = {};
   if (box) box.querySelectorAll('[data-guided-smoke-field]').forEach(i => { fields[i.getAttribute('data-guided-smoke-field')] = i.value; });
@@ -449,7 +450,7 @@ async function boxRun(fn, arg, o, mask) {
   const empty = o.required.filter(f => !fields[f.name]).map(f => f.label);
   if (empty.length) { const error = o.emptyText + empty.join(', '); show(error); return { error }; }
   try {
-    const result = mask(await fn({ fields, arg }), secrets);
+    const result = mask(await fn({ fields, arg, url: p => join(o.base, p, true) }), secrets);
     if (box && result !== undefined) show(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
     return { result };
   } catch (e) {
@@ -499,6 +500,21 @@ function widen(locator) {
     if (typeof selector !== 'string' || !/ >> nth=-?\d+$/.test(selector) || !locator._frame) return null;
     return locator._frame.locator(selector.replace(/ >> nth=-?\d+$/, ''));
   } catch { return null; }
+}
+
+/**
+ * The address of a path of the application. Paths are relative to the application's root, which is `base` with its
+ * own path: under an application path (https://test01/App, an IIS application), '/orders', 'orders' and '/' are
+ * https://test01/App/orders and https://test01/App/. A full address (https://…, //host/…) is taken as it is. With
+ * `pathOnly`, the path, query and fragment alone, for a call made from the page itself (its own origin, even after a
+ * redirect from http to https). Runs in the page too (inPage's url()): it uses nothing but URL.
+ */
+function appUrl(base, p, pathOnly = false) {
+  const s = String(p == null ? '' : p);
+  if (/^([a-z][a-z\d+.-]*:|\/\/)/i.test(s)) return pathOnly ? s : new URL(s, base).toString();
+  const root = new URL(base);
+  const u = new URL(`${root.pathname.replace(/\/+$/, '')}/${s.replace(/^\/+/, '')}`, root.origin);
+  return pathOnly ? u.pathname + u.search + u.hash : u.toString();
 }
 
 function isLocal(base) {
@@ -896,7 +912,7 @@ async function walk(o) {
       throw new Error('inPage needs an arrow function or a function expression: inPage(async ({ fields, arg }) => { … }, arg).');
     }
     const o = {
-      boxed: !!box, noBox: t.boxGone, emptyText: t.boxEmpty,
+      base, boxed: !!box, noBox: t.boxGone, emptyText: t.boxEmpty,
       required: box ? box.fields.filter(f => !f.optional).map(f => ({ name: f.name, label: f.label })) : [],
     };
     if (box) {
@@ -909,7 +925,7 @@ async function walk(o) {
       }
     }
     // One expression, not a function plus argument: the plan's function travels as source and runs inside the page.
-    const out = await page.evaluate(`(${boxRun})(${fn}, ${JSON.stringify(arg)}, ${JSON.stringify(o)}, ${redact})`);
+    const out = await page.evaluate(`(${boxRun})(${fn}, ${JSON.stringify(arg)}, ${JSON.stringify(o)}, ${redact}, ${appUrl})`);
     if (out && out.error) throw new Error(out.error);
     return out ? out.result : undefined;
   };
@@ -1087,8 +1103,8 @@ async function walk(o) {
 
   const ctx = {
     page, context, base, lang: options.lang, state: {}, walkDir,
-    url: p => new URL(p, base).toString(),
-    goto: async p => { await page.goto(new URL(p, base).toString()); await page.waitForLoadState('load'); },
+    url: p => appUrl(base, p),
+    goto: async p => { await page.goto(appUrl(base, p)); await page.waitForLoadState('load'); },
     mark,
     text,
     secretBox,
@@ -1291,4 +1307,4 @@ async function walk(o) {
   }
 }
 
-module.exports = { walk, isLocal, normalizeCheck, expectLabel, drawPanel, drawBox, emptyFields, seenIndices, redact, poll, isFunctionExpression, widen, PACE };
+module.exports = { walk, appUrl, isLocal, normalizeCheck, expectLabel, drawPanel, drawBox, emptyFields, seenIndices, redact, poll, isFunctionExpression, widen, PACE };

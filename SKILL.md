@@ -58,7 +58,7 @@ Flags (order free; unknown flags and bad values are refused with a clear message
 | Flag | Meaning |
 |---|---|
 | `--browser chrome\|edge` | Force a browser (default: the system's default browser when it is Chrome or Edge, else Chrome, else Edge) |
-| `--base <url>` | Address of the application (default: the plan's `base`; detect the running app's port when writing the plan) |
+| `--base <url>` | Address of the application (default: the plan's `base`; detect the running app's port when writing the plan). It may carry the application's path (`https://test01/App`): the plan's paths are read under it |
 | `--pace slow\|normal\|fast` | Browser speed (default `slow`) |
 | `--from <n>` / `--only <n,m,a-b>` / `--retry-failed` | Run part of a plan (one of the three). `--retry-failed` reruns the steps marked ✖ in the given or latest walk |
 | `--skip-writes` | Skip every permitted (approve) step without asking |

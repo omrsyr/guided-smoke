@@ -38,16 +38,17 @@ The step context (`ctx`) offers:
 | `page`, `context` | Playwright objects |
 | `mark(locator)` | Outline the place the user should look at (orange) and scroll to it |
 | `submit(locator)` | Click and wait for the page that loads (POST / redirect) |
-| `goto(path)` | Open a path relative to `base` |
+| `goto(path)` | Open a path of the application. Paths are relative to `base` including its own path: with `base` `https://test01/App` (an IIS application), `goto('/orders')` opens `https://test01/App/orders`. A full address is opened as it is |
 | `download(locator)` | Click, save the download, return `{ name, size }`; the file is deleted unless `--keep-downloads` |
 | `text(locator)` | Text of the first match a person can see (the one `mark()` outlines), whitespace collapsed (uses `textContent`) |
 | `visible(locator)`, `count(locator)` | Small helpers |
 | `secretBox({ title, fields })` | A box on the page where the user types values a step needs (an API account); `null` removes it |
-| `inPage(fn, arg)` | Run `fn({ fields, arg })` inside the page; the box's values come back masked as `•••`. Waits while a required field is empty |
+| `inPage(fn, arg)` | Run `fn({ fields, arg, url })` inside the page; the box's values come back masked as `•••`. Waits while a required field is empty. Call the application as `fetch(url('/api/…'))`, so the call keeps `base`'s path |
 | `poll(fn, { until, timeout, interval })` | Call `fn` until `until(value)` holds (default: truthy) or `timeout` ms pass (default 30000, every 1000); returns the last value |
 | `probe({ field, submit, saved, message, values })` | Send one field's form once per value and sort what happened; only in a step marked `probe: true` (rule 18, [probing](probing.md)) |
 | `state` | An object shared by all steps of the walk |
-| `sleep(ms)`, `url(path)`, `log(msg)`, `walkDir` | — |
+| `url(path)` | The full address of a path of the application, read as `goto` reads it |
+| `sleep(ms)`, `log(msg)`, `walkDir` | — |
 
 `check` returns `true/false`, `[ok, text]`, `[ok, okText, failText]` or `{ ok, text }`. If `run` or `check` throws,
 the panel shows the error as a failed check and the user decides.

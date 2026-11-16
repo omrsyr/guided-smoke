@@ -55,10 +55,11 @@ const db = {
   reminders: () => store.reminders,
   calls: () => store.calls.length,
   notes: () => store.notes.length,
-  /** Deletes the notes that start with the prefix (the test records of a probe); returns how many. */
+  /** Deletes the notes that start with the prefix, in any case (the test records of a probe); returns how many. */
   deleteNotes(prefix) {
     const before = store.notes.length;
-    store.notes = store.notes.filter(n => !n.startsWith(prefix));
+    const lower = prefix.toLowerCase();
+    store.notes = store.notes.filter(n => !n.toLowerCase().startsWith(lower));
     return before - store.notes.length;
   },
 };
