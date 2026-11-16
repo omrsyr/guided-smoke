@@ -142,7 +142,7 @@ function planSource(planPath) {
 
 // What a step may say. Anything else is a mistake the engine would otherwise pass over in silence (a skipIf that never
 // skips), so it is refused like an unknown flag.
-const STEP_KEYS = ['title', 'did', 'expect', 'run', 'check', 'approve', 'skipTo', 'probe'];
+const STEP_KEYS = ['title', 'did', 'expect', 'run', 'check', 'approve', 'skipTo', 'probe', 'undo'];
 
 function loadPlan(file) {
   delete require.cache[require.resolve(file)];
@@ -158,6 +158,13 @@ function loadPlan(file) {
     if (s.check && typeof s.check !== 'function') throw new UsageError(`${file}: step ${i + 1} check must be a function.`);
     if (s.probe !== undefined && typeof s.probe !== 'boolean') throw new UsageError(`${file}: step ${i + 1} probe must be true or false.`);
     if (s.skipTo && !s.approve && !s.probe) throw new UsageError(`${file}: step ${i + 1} uses skipTo without approve.`);
+    if (s.undo !== undefined) {
+      if (!s.approve && !s.probe) throw new UsageError(`${file}: step ${i + 1} ("${s.title}") has an undo but asks no permission: undo belongs to a permitted step (approve).`);
+      const u = s.undo;
+      const shape = u && typeof u === 'object' && typeof u.what === 'string' && u.what.trim() && typeof u.run === 'function'
+        && Object.keys(u).every(k => k === 'what' || k === 'run');
+      if (!shape) throw new UsageError(`${file}: step ${i + 1} undo must be { what: 'what it puts back', run: async ctx => { … } }.`);
+    }
   });
   try { compileIgnore(plan.ignoreErrors); compileConfig(plan.network); } catch (e) { throw new UsageError(`${file}: ${e.message}`); }
   const envError = checkEnvs(plan);
@@ -224,10 +231,10 @@ function writeReport(project, planId, walkId) {
     const m = store.readJson(path.join(store.walkDir(project, id), 'walk.json'));
     return m && (m.env || null) === env ? { id, meta: m } : null;
   }).filter(Boolean).slice(0, EARLIER_WALKS).map(w => ({ meta: w.meta, events: store.readEvents(project, w.id) }));
-  const { markdown, counts, against, errorSteps, networkSteps, probeSteps } = report.build(meta, store.readEvents(project, walkId), earlier.length ? earlier : null);
+  const { markdown, counts, against, errorSteps, networkSteps, probeSteps, undoLeft } = report.build(meta, store.readEvents(project, walkId), earlier.length ? earlier : null);
   const file = path.join(dir, 'report.md');
   fs.writeFileSync(file, markdown);
-  return { file, markdown, counts, against, errorSteps, networkSteps, probeSteps, meta };
+  return { file, markdown, counts, against, errorSteps, networkSteps, probeSteps, undoLeft, meta };
 }
 
 async function main() {
@@ -457,7 +464,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
   }
   const r = writeReport(project, planId, walkId);
   console.log(`report: ${r.file}`);
-  console.log(`result: ${r.meta.result} · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}${r.against.length ? ` · ⚠ passed over a failed check: ${r.against.join(', ')}` : ''}${r.errorSteps.length ? ` · ⚠ browser errors in steps: ${r.errorSteps.join(', ')}` : ''}${r.networkSteps.length ? ` · ⚠ network findings in steps: ${r.networkSteps.join(', ')}` : ''}${r.probeSteps.length ? ` · ⚠ probe rows different in steps: ${r.probeSteps.join(', ')}` : ''}`);
+  console.log(`result: ${r.meta.result} · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}${r.against.length ? ` · ⚠ passed over a failed check: ${r.against.join(', ')}` : ''}${r.errorSteps.length ? ` · ⚠ browser errors in steps: ${r.errorSteps.join(', ')}` : ''}${r.networkSteps.length ? ` · ⚠ network findings in steps: ${r.networkSteps.join(', ')}` : ''}${r.probeSteps.length ? ` · ⚠ probe rows different in steps: ${r.probeSteps.join(', ')}` : ''}${r.undoLeft.length ? ` · ⚠ not put back (undo): steps ${r.undoLeft.join(', ')}` : ''}`);
   return EXIT.ok;
 }
 

@@ -27,6 +27,10 @@ rebuilds it. It contains:
   server; an assumed expectation that differs is doubted first. The summary counts tries and differing rows; the note
   column says "🧪 10/11 as expected"; the paste block lists only the rows that differ. A probe step skipped without
   `--probe` reads "runs with --probe" and stays out of the comparison and the paste block.
+- **Undo** (only when a permitted step had an `undo`): per step whether its change was put back (by a step of the
+  plan, at the end, after Stop, an error or the browser closing), failed (with the reason) or is still pending (the
+  process ended first), each with what it puts back. The summary warns about every change not put back, and the
+  paste block counts them.
 - **Compared with earlier walks** of the same plan in the same environment (a walk on the test server is not compared
   with one on this machine): every step whose result changed (`✖ → ✔`), each against the newest
   earlier walk in which that step was answered ✔ or ✖, so a walk stopped early or a `--retry-failed` walk adds no
@@ -49,7 +53,8 @@ Keep it short:
    With `--probe`, every red row: the value, what was expected and what happened, and whether it is a bug (a crash, a
    value saved that should be refused) or an expectation to revisit (❓). Say when 🛑 rows mean the server was not
    tested.
-3. The next action: fix and `--retry-failed` (with `--probe` for a probe step), or "all passed".
+3. Every change not put back (⚠ in the summary): the step, why, and what to do by hand.
+4. The next action: fix and `--retry-failed` (with `--probe` for a probe step), or "all passed".
 
 ## Effort
 

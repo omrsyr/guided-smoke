@@ -42,6 +42,11 @@ const LABELS = {
     probeSummary: ['🧪 Probing: {tries} tries in step {steps}; {different}.', '🧪 Probing: {tries} tries in steps {steps}; {different}.'], probeDifferent: ['{n} row different', '{n} rows different'], probeNoneDifferent: 'all as expected',
     probeStep: '{tries} tries, {different} different', probeShort: '🧪 {ok}/{tries} as expected', pasteProbe: '🧪 {ok}/{tries}',
     pasteRow: '{value}: expected {expect}, got {got}',
+    undo: 'Undo', undoNote: 'What the permitted steps changed and the plan puts back: in a step of its own (`undo(n)`), else when the walk ends, after Stop, an error or the browser closing, last change first. A change not put back is still in place: do it by hand as its line says.',
+    undoSummary: '↩ Undo: {done} of {total} changes put back.', undoLeft: '⚠ Not put back: steps {steps}. Their changes are still in place; see "Undo".',
+    undoDone: 'put back', undoFailed: 'failed', undoPending: 'not put back: the walk was cut off before it could run',
+    undoBy: { plan: 'by step {at}', end: 'at the end', stop: 'after Stop', error: 'after the error', close: 'after the browser closed' },
+    pasteUndo: '↩ Undo: {done}/{total} put back',
   },
   tr: {
     title: 'Smoke raporu', plan: 'Plan', workItem: 'İş', date: 'Tarih', measured: 'Ölçülen koşu süresi',
@@ -77,6 +82,11 @@ const LABELS = {
     probeSummary: ['🧪 Patlatma: {steps}. adımda {tries} deneme; {different}.', '🧪 Patlatma: {steps}. adımlarda {tries} deneme; {different}.'], probeDifferent: ['{n} satır farklı', '{n} satır farklı'], probeNoneDifferent: 'hepsi beklendiği gibi',
     probeStep: '{tries} deneme, {different} farklı', probeShort: '🧪 {ok}/{tries} beklendiği gibi', pasteProbe: '🧪 {ok}/{tries}',
     pasteRow: '{value}: beklenen {expect}, olan {got}',
+    undo: 'Geri alma', undoNote: 'İzinli adımların değiştirdikleri ve planın geri aldıkları: planın kendi adımında (`undo(n)`), yoksa koşu bitince, Durdur\'dan, hatadan ya da tarayıcı kapandıktan sonra; son değişiklik önce. Geri alınmayan değişiklik yerinde duruyor: satırında yazanı elle yap.',
+    undoSummary: '↩ Geri alma: {total} değişiklikten {done} tanesi geri alındı.', undoLeft: '⚠ Geri alınmayan adımlar: {steps}. Değişiklikleri yerinde duruyor; bkz. "Geri alma".',
+    undoDone: 'geri alındı', undoFailed: 'başarısız', undoPending: 'geri alınmadı: koşu, geri alma çalışamadan kesildi',
+    undoBy: { plan: '{at}. adımda', end: 'koşu sonunda', stop: 'Durdur\'dan sonra', error: 'hatadan sonra', close: 'tarayıcı kapanınca' },
+    pasteUndo: '↩ Geri alma: {done}/{total}',
   },
 };
 
@@ -149,6 +159,13 @@ function build(meta, events, prev) {
     return n ? `🌐 ${e.network.critical ? '⛔ ' : ''}${plural(n, L.networkFindings)}` : null;
   };
   const plural = (n, [one, many]) => (n === 1 ? one : many).replace('{n}', n);
+  // Undo: each step whose change was taken down to be put back, in its last state: put back, failed, or still pending
+  // because the walk was cut off (the process ended) before it could run.
+  const undoBy = new Map();
+  for (const e of events) if (e.kind === 'undo') undoBy.set(e.n, { ...(undoBy.get(e.n) || {}), ...e });
+  const undoList = [...undoBy.values()].sort((a, b) => a.n - b.n);
+  const undoLeft = undoList.filter(u => u.answer !== 'done');
+  const undoDone = undoList.length - undoLeft.length;
   const start = localTime(meta.readyAt || meta.startedAt);
   const end = localTime(meta.endedAt);
   const lines = [];
@@ -181,6 +198,10 @@ function build(meta, events, prev) {
     const different = probed.reduce((sum, e) => sum + e.probe.different, 0);
     const what = different ? `${plural(different, L.probeDifferent)} (${probeSteps.join(', ')})` : L.probeNoneDifferent;
     lines.push('', (probed.length === 1 ? L.probeSummary[0] : L.probeSummary[1]).replace('{tries}', tries).replace('{steps}', probed.map(e => e.n).join(', ')).replace('{different}', what));
+  }
+  if (undoList.length) {
+    if (undoLeft.length) lines.push('', L.undoLeft.replace('{steps}', undoLeft.map(u => u.n).join(', ')));
+    lines.push('', L.undoSummary.replace('{done}', undoDone).replace('{total}', undoList.length));
   }
 
   lines.push('', `## ${L.steps}`, '');
@@ -216,6 +237,14 @@ function build(meta, events, prev) {
 
   if (meta.network) lines.push(...networkSection(meta, states, L, t));
   if (probed.length) lines.push(...probeSection(probed, L, t));
+  if (undoList.length) {
+    lines.push('', `## ${L.undo}`, '', L.undoNote, '');
+    for (const u of undoList) {
+      const by = u.by ? ` (${(L.undoBy[u.by] || u.by).replace('{at}', u.inStep)})` : '';
+      const state = u.answer === 'done' ? `✔ ${L.undoDone}${by}` : u.answer === 'failed' ? `✖ ${L.undoFailed}${by}: ${u.error}` : `⏳ ${L.undoPending}`;
+      lines.push(`- ${u.n}. ${cell(u.title)}: ${cell(state)} · ${cell(u.what)}`);
+    }
+  }
 
   const earlier = !prev ? [] : Array.isArray(prev) ? prev : [prev];
   if (earlier.length) {
@@ -241,10 +270,14 @@ function build(meta, events, prev) {
       lines.push(`   ✖ ${row}${r.message ? ` — "${r.message}"` : ''}`);
     }
   }
+  if (undoList.length) {
+    lines.push(L.pasteUndo.replace('{done}', undoDone).replace('{total}', undoList.length));
+    for (const u of undoLeft) lines.push(`   ${u.answer === 'failed' ? `✖ ${u.n}. ${u.title}: ${L.undoFailed} — ${u.error}` : `⏳ ${u.n}. ${u.title}: ${L.undoPending}`}`);
+  }
   lines.push(`${L.measured}: ${duration(meta.measuredSeconds, lang)}`);
   lines.push('```', '');
 
-  return { markdown: lines.join('\n'), counts: c, against, errorSteps, networkSteps, probeSteps };
+  return { markdown: lines.join('\n'), counts: c, against, errorSteps, networkSteps, probeSteps, undoLeft: undoLeft.map(u => u.n) };
 }
 
 /** A walk's steps as "title#k" (the k-th step with that title), by number. */

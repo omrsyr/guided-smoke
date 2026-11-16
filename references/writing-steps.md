@@ -49,6 +49,7 @@ The step context (`ctx`) offers:
 | `secretBox({ title, fields })` | A box on the page where the user types values a step needs (an API account); `null` removes it |
 | `inPage(fn, arg)` | Run `fn({ fields, arg, url })` inside the page; the box's values come back masked as `•••`. Waits while a required field is empty. Call the application as `fetch(url('/api/…'))`, so the call keeps `base`'s path |
 | `poll(fn, { until, timeout, interval })` | Call `fn` until `until(value)` holds (default: truthy) or `timeout` ms pass (default 30000, every 1000); returns the last value |
+| `undo(n)` | Run step `n`'s undo now, in this step (a clean-up step); `true` if it ran, `false` if step `n` has none waiting (not allowed, or already put back). A failed undo throws |
 | `probe({ field, submit, saved, message, values })` | Send one field's form once per value and sort what happened; only in a step marked `probe: true` (rule 18, [probing](probing.md)) |
 | `state` | An object shared by all steps of the walk |
 | `data` | The environment's test records: the plan's `data` with the chosen environment's laid over it (rule 19) |
@@ -86,7 +87,22 @@ For an API that needs the user's account, the project's database tool, or a back
 8. **Irreversible screen actions** (suspend, delete, send): either click the dialog's "No/Cancel" and verify the dialog
    only, or make the step a permitted one (`approve`) so the user agrees first.
 9. **Permitted steps** (`approve`) for anything outside the page — see [safety](safety.md). Use `skipTo: <n>` when the
-   steps after it make no sense without it (steps before `n` are skipped too).
+   steps after it make no sense without it (steps before `n` are skipped too). Give such a step an `undo` whenever its
+   change can be put back:
+
+   ```js
+   undo: {
+     what: 'Order 2001\'s due date goes back to what it was.',     // shown when asking, and in the report
+     run: async ({ state, data }) => { if ('dueBefore' in state) await setDue(data.order, state.dueBefore); },
+   },
+   ```
+
+   The undo is taken down when the user allows the step, before `run`: a step that fails half-way is put back too, so
+   write the undo to do the right thing whatever the step got done (read the old value into `state` first, and do
+   nothing without it). A clean-up step may run it with `undo(n)`; what is left runs when the walk ends, after ■ Stop,
+   an error or the browser closing, last change first, without asking. An undo gets `state`, `data`, `base`, `url`,
+   `log` and `poll`, never the page (the browser may be gone): use the database tool or an API. It has 60 s. The
+   closing panel and the report's "Undo" section say what was put back and what was not, with `what` to do by hand.
 10. **Navigation:** after a click that loads a page use `submit()` (or `Promise.all([page.waitForEvent('load'),
     click])`); `waitForLoadState` alone returns at once on the current page.
 11. **Text:** read with `textContent`/`text()`; `innerText` returns CSS-transformed text (upper-case headers).

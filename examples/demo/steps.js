@@ -1,6 +1,7 @@
 // The demo plan: `node engine/run.js demo` starts the demo application (server.js) and walks this plan against it.
 // It shows every kind of step: a plain one, a form submit, a validation the browser blocks, a download, the
-// application's own dialog, permitted steps that change data outside the page, a background job waited for with
+// application's own dialog, permitted steps that change data outside the page and put it back when the walk ends
+// (undo), a background job waited for with
 // poll(), API calls with an account the user types into the value box, and a page whose background call fails (the
 // panel shows it; with --network also what its other background calls send and cost). The last four are probe steps,
 // walked only with --probe: two fields sent with boundary and wrong values, a double click, and the clean-up of what the
@@ -38,9 +39,11 @@ const P = {
     s7: ['Overdue order (due date moved into the past)', 'I moved the due date of order 1001 to yesterday and reloaded the page.', [`A yellow "${A.overdue}" badge next to the status.`]],
     s7what: 'In the demo\'s data, set the due date of order 1001 to yesterday: one change limited to that order; the number of changed rows is shown.',
     s7yes: '✔ Yes, move the date',
+    s7undo: 'Order 1001\'s due date goes back to what it was before this step.',
     s8: ['Reminder job triggered', `I opened "${A.jobs}", ticked "${demo.JOB}" and clicked "${A.trigger}".`, [`In the job's row "${A.lastRun}" reads "${A.running}" (the job takes a few seconds).`]],
     s8what: `Run the "${demo.JOB}" job now: it writes a reminder for every overdue order in the demo's data.`,
     s8yes: '✔ Yes, run the job',
+    s8undo: 'The reminders the job wrote are deleted.',
     s9: ['Reminder written (waited for the job)', 'I counted the reminders in the demo\'s data, waiting up to 15 seconds for the job, then opened order 1001.', [`"✉ ${A.reminder}" under the order details.`]],
     s10: ['Value box ready', 'I added a box at the bottom left of the page for the demo API account.', [`Type the account shown in the "${A.apiAccount}" card into the box (e-mail and password), then click "Correct, continue".`, 'The script does not read the box; the values stay in the page.']],
     s11: ['API check answers "Valid"', 'With the box\'s account I signed in to the demo API and called POST /api/check for machine SMOKE-A.', ['The box shows http 200 and status "Valid".', 'The e-mail and the password appear nowhere in the result.']],
@@ -78,9 +81,11 @@ const P = {
     s7: ['Gecikmiş sipariş (son tarih geçmişe çekildi)', '1001 numaralı siparişin son tarihini düne çektim ve sayfayı yeniledim.', [`Durumun yanında sarı "${A.overdue}" rozeti.`]],
     s7what: 'Demonun verisinde 1001 numaralı siparişin son tarihini düne çek: yalnız o siparişle sınırlı tek değişiklik; değişen satır sayısı gösterilir.',
     s7yes: '✔ Evet, tarihi çek',
+    s7undo: '1001 numaralı siparişin son tarihi bu adımdan önceki değerine döner.',
     s8: ['Hatırlatma işi tetiklendi', `"${A.jobs}" sayfasını açtım, "${demo.JOB}" satırını işaretledim ve "${A.trigger}" düğmesine bastım.`, [`İşin satırında "${A.lastRun}" "${A.running}" yazıyor (iş birkaç saniye sürer).`]],
     s8what: `"${demo.JOB}" işini şimdi çalıştır: demonun verisinde gecikmiş her sipariş için hatırlatma yazar.`,
     s8yes: '✔ Evet, işi çalıştır',
+    s8undo: 'İşin yazdığı hatırlatmalar silinir.',
     s9: ['Hatırlatma yazıldı (iş beklendi)', 'Demonun verisinde hatırlatmaları saydım, iş için 15 saniyeye kadar bekledim, sonra 1001 numaralı siparişi açtım.', [`Sipariş bilgilerinin altında "✉ ${A.reminder}"`]],
     s10: ['Değer kutusu hazır', 'Sayfanın sol altına demo API hesabı için bir kutu ekledim.', [`"${A.apiAccount}" kartındaki hesabı (e-posta ve parola) kutuya yaz, sonra "Doğru, devam" de.`, 'Betik kutuyu okumaz; değerler sayfada kalır.']],
     s11: ['API kontrolü "Valid" diyor', 'Kutudaki hesapla demo API\'sine giriş yaptım ve SMOKE-A makinesi için POST /api/check çağırdım.', ['Kutuda http 200 ve status "Valid" görünüyor.', 'Sonuçta e-posta da parola da hiçbir yerde geçmiyor.']],
@@ -192,9 +197,16 @@ module.exports = {
     {
       ...step(P.s7),
       approve: { what: P.s7what, yes: P.s7yes },
+      // Taken down when the step is allowed and run when the walk ends, also after Stop: it must do the right thing
+      // whatever the step got done. Here: nothing, unless the old date was read.
+      undo: {
+        what: P.s7undo,
+        run: async ({ state }) => { if ('dueBefore' in state) demo.db.setDue(demo.ORDER, state.dueBefore); },
+      },
       skipTo: 10,
       run: async ({ page, mark, state }) => {
         // Stands in for the project's database tool: one change limited to the test record, row count kept.
+        state.dueBefore = demo.db.due(demo.ORDER);
         state.rows = demo.db.setDueDays(demo.ORDER, -1);
         await page.reload();
         await mark(page.locator('.badge-overdue'));
@@ -204,6 +216,7 @@ module.exports = {
     {
       ...step(P.s8),
       approve: { what: P.s8what, yes: P.s8yes },
+      undo: { what: P.s8undo, run: async () => { demo.db.clearReminders(); } },
       skipTo: 10,
       run: async ({ page, goto, mark, submit }) => {
         await goto('/jobs');

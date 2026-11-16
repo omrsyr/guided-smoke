@@ -93,7 +93,7 @@ test('a step with a key the engine does not know is refused before a browser ope
   fs.writeFileSync(store.planFile(P, id), "module.exports = { base: 'http://localhost:1', steps: [{ title: 'a', run: async () => {} }, { title: 'b', skipIf: () => true, run: async () => {} }] };");
   const r = cli('run', id);
   assert.strictEqual(r.status, 2);
-  assert.match(r.stderr, /step 2 \("b"\) has an unknown key "skipIf"\. A step knows: title, did, expect, run, check, approve, skipTo, probe\./);
+  assert.match(r.stderr, /step 2 \("b"\) has an unknown key "skipIf"\. A step knows: title, did, expect, run, check, approve, skipTo, probe, undo\./);
   assert.ok(!fs.existsSync(store.walkDir(P, `${id}-1`)), 'no walk was started');
 });
 
@@ -152,6 +152,39 @@ test('a walk is compared with, and --retry-failed reruns, walks in its own envir
   assert.match(retry.stdout, /Walk 7005-env-compare-3 has no steps marked different/);
   assert.match(cli('list').stdout, /7005-env-compare-3 .* \[test\]\n/);
   assert.doesNotMatch(cli('report', `${id}-2`).stdout, /Environment:|Compared with/, 'the plan\'s own environment: no line, nothing to compare');
+});
+
+test('an undo belongs to a permitted step and has a what and a run; the report keeps one cut off as pending', () => {
+  const id = '7006-undo';
+  fs.mkdirSync(store.planDir(P, id), { recursive: true });
+  for (const [step, msg] of [
+    ["{ title: 'a', undo: { what: 'x', run: async () => {} }, run: async () => {} }", /step 1 \("a"\) has an undo but asks no permission/],
+    ["{ title: 'a', approve: 'x', undo: { what: 'x' }, run: async () => {} }", /step 1 undo must be \{ what: 'what it puts back', run: async ctx => \{ … \} \}\./],
+    ["{ title: 'a', approve: 'x', undo: { what: ' ', run: async () => {} }, run: async () => {} }", /undo must be/],
+    ["{ title: 'a', approve: 'x', undo: { what: 'x', run: async () => {}, when: 'end' }, run: async () => {} }", /undo must be/],
+  ]) {
+    fs.writeFileSync(store.planFile(P, id), `module.exports = { base: 'http://localhost:1', steps: [${step}] };`);
+    const r = cli('run', id);
+    assert.strictEqual(r.status, 2, step);
+    assert.match(r.stderr, msg);
+  }
+  assert.ok(!fs.existsSync(store.walkDir(P, `${id}-1`)), 'no walk was started');
+  // The process ended before the walk could put the change back: the report says so and keeps what to do by hand.
+  const meta = { totalSteps: 2, titles: ['Move date', 'Look'], lang: 'en', walkId: 'u-1', planId: 'u', readyAt: '2026-11-03T08:00:00Z',
+    result: 'running', browser: 'chrome', browserSource: 'requested', base: 'https://test01/App' };
+  const events = [
+    { n: 1, title: 'Move date', kind: 'approve', answer: 'approved' },
+    { n: 1, title: 'Move date', kind: 'undo', answer: 'registered', what: 'Date back to 2026-12-01.' },
+    { n: 1, title: 'Move date', kind: 'approve', answer: 'pass' },
+  ];
+  const { markdown, undoLeft } = report.build(meta, events, null);
+  assert.deepStrictEqual(undoLeft, [1]);
+  assert.match(markdown, /⚠ Not put back: steps 1\./);
+  assert.match(markdown, /- 1\. Move date: ⏳ not put back: the walk was cut off before it could run · Date back to 2026-12-01\./);
+  assert.match(markdown, /↩ Undo: 0\/1 put back\n {3}⏳ 1\. Move date: not put back/);
+  assert.strictEqual(report.finalStates(events).get(1).answer, 'pass', 'undo events leave the step\'s answer alone');
+  assert.match(report.build({ ...meta, lang: 'tr' }, events, null).markdown, /## Geri alma[\s\S]*⏳ geri alınmadı/);
+  assert.doesNotMatch(report.build(meta, events.filter(e => e.kind !== 'undo'), null).markdown, /Undo|Not put back/, 'no undo, no section');
 });
 
 test('only loopback addresses count as local', () => {

@@ -55,7 +55,7 @@ at most three questions that change the plan, and write only the approved values
 
 In the chat, list the steps as a numbered list: title and one line of what the user will check. Mark probe steps (they
 run only with `--probe`). Mark permitted steps
-(they will ask again in the browser). Say how many steps there are and roughly how long it takes (about 30 s per step).
+(they will ask again in the browser) and say which of them put their change back when the walk ends (`undo`). Say how many steps there are and roughly how long it takes (about 30 s per step).
 Wait for the user's go-ahead. `guided-smoke plan` stops here.
 
 ## 5. Run

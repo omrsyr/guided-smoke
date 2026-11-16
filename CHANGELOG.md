@@ -12,6 +12,15 @@
     marks the walk `[test]`.
   - A report compares a walk only with earlier walks in the same environment, and `--retry-failed` reruns the ✖ steps
     of the newest walk there: a test server's records and version are not a developer machine's.
+- **Undo: a permitted step can put its change back.** `undo: { what, run }` on a step with `approve` (or a probe
+  step). The approval panel says what will be put back. The undo is taken down when the user allows the step, before
+  it runs, so a step that fails half-way is put back too. A clean-up step may run it with `undo(n)`; what is left runs
+  when the walk ends, after ■ Stop, an error or the browser closing, last change first, without asking. An undo gets
+  the walk's `state` and `data`, never the page, and has 60 s.
+  - The closing panel says how many changes were put back and names each that was not, with what to do by hand. The
+    report's "Undo" section lists every one: put back (and when), failed (and why), or pending when the process ended
+    first; the summary warns about each change not put back and the paste block counts them.
+  - The demo puts back its overdue date and the reminder its job wrote.
 
 ## 1.4.2 — 2026-11-16
 

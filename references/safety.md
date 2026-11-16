@@ -52,6 +52,9 @@ applies to it.
   skipped unless `--allow-remote-writes` is given. Do not suggest that flag for production.
 - Limit a write to one test record by its id, report the affected row count, and treat a count other than expected as
   a failed check.
+- Give the step an `undo` when its change can be put back (writing-steps rule 9): on a shared test server the next
+  tester finds the record as it was. The approval panel shows what the undo will put back; the undo runs without
+  asking again, limited to what the step changed.
 - Use the project's existing database tooling; read credentials from configuration without printing them.
 
 ## Recordings (`--video`, `--trace`)

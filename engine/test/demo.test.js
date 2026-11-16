@@ -99,6 +99,10 @@ for (const [lang, boxLate, withNetwork] of [['en', false, true], ['tr', true, fa
         .map(f => fs.readFileSync(path.join(walkDir, f), 'utf8')).join('\n');
       assert.ok(!recorded.includes(server.API_ACCOUNT.password) && !recorded.includes(server.API_ACCOUNT.email), 'box values stay out of the records');
       assert.ok(!recorded.includes(server.PROFILE_HASH), 'the leaked hash itself stays out of the records');
+      // The two permitted steps' changes are put back when the walk ends, last change first.
+      assert.deepStrictEqual(events.filter(e => e.kind === 'undo').map(e => [e.n, e.answer, e.by]),
+        [[7, 'registered', undefined], [8, 'registered', undefined], [8, 'done', 'end'], [7, 'done', 'end']]);
+      assert.deepStrictEqual([server.db.due(server.ORDER), server.db.reminders()], [server.isoDay(30), 0]);
 
       if (!withNetwork) {
         assert.ok(!meta.network && steps.every(e => !e.network), 'without --network nothing about the network is recorded');
@@ -648,6 +652,62 @@ test('under an application path (an IIS application) the start page, goto, url a
     assert.strictEqual(events.length, 3);
     for (const e of events) assert.ok(e.auto.ok, `${e.title}: ${e.auto.text}`);
     assert.ok(!asked.some(u => !u.startsWith('/app/') && u !== '/favicon.ico'), `asked outside the application: ${asked.join(' ')}`);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+test('undo: the plan puts a change back itself, the rest go back after Stop, last first; a failed undo is shown and reported', { skip, timeout: 60000 }, async () => {
+  const app = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><title>t</title><h1 id="page">page</h1>');
+  });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  const db = { a: 'old', b: 'old', c: 'old' };
+  const ran = [];
+  const change = key => ({
+    title: `Change ${key}`, did: 'x', expect: ['x'], approve: { what: `Set ${key} to new.` },
+    run: async ({ state }) => { state[key] = db[key]; db[key] = 'new'; },
+  });
+  const plan = {
+    id: 'undo', ready: '#page', data: { tag: 'T' },
+    steps: [
+      { ...change('a'), undo: { what: 'a back', run: async u => { ran.push(['a', Object.keys(u).sort().join(','), u.data.tag]); db.a = u.state.a; } } },
+      { ...change('b'), undo: { what: 'b back', run: async () => { ran.push(['b']); throw new Error('the row is locked'); } } },
+      { ...change('c'), undo: { what: 'c back', run: async ({ state }) => { ran.push(['c']); db.c = state.c; } } },
+      { title: 'Clean-up by the plan', did: 'x', expect: ['x'],
+        run: async ({ undo, state }) => { state.cleaned = [await undo(3), await undo(3), await undo(9)]; },
+        check: async ({ state }) => [String(state.cleaned) === 'true,false,false' && db.c === 'old', `${state.cleaned} ${db.c}`] },
+      { title: 'Stopped here', did: 'x', expect: ['x'], run: async () => {} },
+    ],
+  };
+  let closing = null;
+  try {
+    const { meta } = await autoWalk({
+      playwright, plan, browser: chosen, base: `http://127.0.0.1:${app.address().port}`, lang: 'en', walkDir, stopAt: 'Stopped here',
+      onPanel: async (page, { title }) => { if (title === texts('en').doneTitle) closing = await page.locator('#__guided_smoke').textContent(); },
+    });
+    assert.strictEqual(meta.result, 'stopped');
+    // An undo gets the walk's state and data, never the page.
+    assert.deepStrictEqual(ran, [['c'], ['b'], ['a', 'base,data,log,poll,state,url', 'T']]);
+    assert.deepStrictEqual(db, { a: 'old', b: 'new', c: 'old' });
+    const events = readEvents(walkDir);
+    assert.ok(events.find(e => e.n === 4 && e.kind === 'step').auto.ok, 'undo(3) ran once; a step without one or not allowed gives false');
+    assert.deepStrictEqual(events.filter(e => e.kind === 'undo').map(e => [e.n, e.answer, e.by, e.inStep, e.error]), [
+      [1, 'registered', undefined, undefined, undefined], [2, 'registered', undefined, undefined, undefined], [3, 'registered', undefined, undefined, undefined],
+      [3, 'done', 'plan', 4, undefined], [2, 'failed', 'stop', undefined, 'the row is locked'], [1, 'done', 'stop', undefined, undefined],
+    ]);
+    assert.match(closing, /↩ Put back: 2 of 3 changes\./);
+    assert.match(closing, /✖ Step 2 was not put back \(the row is locked\)\. Do it by hand: b back/);
+    const { markdown, undoLeft } = report.build(meta, events, null);
+    assert.deepStrictEqual(undoLeft, [2]);
+    assert.match(markdown, /⚠ Not put back: steps 2\./);
+    assert.match(markdown, /- 1\. Change a: ✔ put back \(after Stop\) · a back/);
+    assert.match(markdown, /- 2\. Change b: ✖ failed \(after Stop\): the row is locked · b back/);
+    assert.match(markdown, /- 3\. Change c: ✔ put back \(by step 4\) · c back/);
+    assert.match(markdown, /↩ Undo: 2\/3 put back\n {3}✖ 2\. Change b: failed — the row is locked\n/);
   } finally {
     await new Promise(resolve => app.close(resolve));
     fs.rmSync(walkDir, { recursive: true, force: true });

@@ -52,7 +52,20 @@ const db = {
     store.due = isoDay(days);
     return 1;
   },
+  /** The order's due date as stored (yyyy-MM-dd, or null), and setting it back to such a value. */
+  due: order => (order === ORDER ? store.due : undefined),
+  setDue(order, due) {
+    if (order !== ORDER) return 0;
+    store.due = due;
+    return 1;
+  },
   reminders: () => store.reminders,
+  /** Deletes the reminders the job wrote; returns how many. */
+  clearReminders() {
+    const n = store.reminders;
+    store.reminders = 0;
+    return n;
+  },
   calls: () => store.calls.length,
   notes: () => store.notes.length,
   /** Deletes the notes that start with the prefix, in any case (the test records of a probe); returns how many. */

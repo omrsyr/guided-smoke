@@ -20,6 +20,7 @@ const { walk } = require('../engine');
  * @param {Function} [o.onPanel] async (page, { header, title }) => {} before each answer (with letAuto: on every tick
  *                               while a countdown runs)
  * @param {boolean} [o.letAuto]  leave a panel alone while its --auto countdown runs
+ * @param {string} [o.stopAt]    press Stop on the panel with this title instead of answering it
  * @param {object} [o.options]   more walk options (auto, trace, video, panel)
  * @param {string} [o.profile]   a kept profile folder, as in a real walk (default: a throw-away one)
  */
@@ -52,7 +53,11 @@ async function autoWalk(o) {
       if (waiting && o.stopOnWait) await page.locator('#__guided_smoke [data-guided-smoke-answer="stop"]').click({ timeout: 2000 });
       else if (waiting) await use.click({ timeout: 2000 });
       const answer = page.locator('#__guided_smoke [data-guided-smoke-answer]:not([data-guided-smoke-answer="stop"])').first();
-      if (!waiting && await answer.count()) {
+      const stopHere = !waiting && o.stopAt && await answer.count()
+        && (await page.locator('#__guided_smoke > div').nth(1).textContent({ timeout: 1000 })) === o.stopAt;
+      if (stopHere) {
+        await page.locator('#__guided_smoke [data-guided-smoke-answer="stop"]').click({ timeout: 2000 });
+      } else if (!waiting && await answer.count()) {
         if (o.onPanel) {
           const panel = page.locator('#__guided_smoke');
           await o.onPanel(page, { header: await panel.locator('span').first().textContent(), title: await panel.locator(':scope > div').nth(1).textContent() });

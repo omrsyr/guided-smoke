@@ -114,7 +114,8 @@ The project is the git repository's folder name (override with `--project`). Dat
 - The user signs in. Never type, store, print or ask for a password; the browser's own password saving is off in the
   smoke profile. An account a step needs for an API call is typed by the user into the value box (`secretBox`).
 - A permitted step (`approve`) is the only way to change anything outside the page. Show exactly what will change, limit
-  it to one test record, and never print connection strings or keys.
+  it to one test record, and never print connection strings or keys. Give it an `undo` when the change can be put
+  back: the walk puts it back when it ends, also after Stop.
 - Walk records are never overwritten; a re-run is a new walk.
 - Do not poll a running walk. Start `run` in the background, wait for it to finish, then read the report.
 - The skill never writes to a work-item tracker. If a work item is known, the report carries a block to paste;

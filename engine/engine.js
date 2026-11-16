@@ -16,6 +16,8 @@ const DEFAULT_LOGIN = /(login|signin|sign-in|giris|auth|account\/)/i;
 const LOGIN_TIMEOUT_MS = 15 * 60 * 1000;
 const STOPPED = 'The walk was stopped.';
 const AUTO_SECONDS = 3;
+// How long a plan's undo may take before it counts as failed: the walk must still end.
+const UNDO_TIMEOUT_MS = 60 * 1000;
 
 const COLORS = { pass: '#198754', diff: '#dc3545', stop: '#6c757d', yes: '#198754', skip: '#fd7e14', info: '#0d6efd', warn: '#fd7e14' };
 
@@ -617,8 +619,9 @@ async function walk(o) {
   };
   saveMeta();
 
+  const append = event => fs.appendFileSync(eventsFile, JSON.stringify({ at: new Date().toISOString(), ...event }) + '\n');
   const record = event => {
-    fs.appendFileSync(eventsFile, JSON.stringify({ at: new Date().toISOString(), ...event }) + '\n');
+    append(event);
     if (event.answer === 'pass' || event.answer === 'diff') counts[event.answer]++;
     if (event.answer === 'skip') counts.skip++;
     if (event.againstCheck) counts.against++;
@@ -1136,7 +1139,48 @@ async function walk(o) {
     sleep: ms => page.waitForTimeout(ms),
     log: message => console.log(String(message)),
   };
-  for (const name of ['goto', 'mark', 'text', 'secretBox', 'inPage', 'probe', 'poll', 'visible', 'count', 'submit', 'download', 'sleep']) {
+
+  // ---- undo: what a permitted step changed, put back by the plan's own code ----
+  // A step's undo is taken down when the user allows the step, before it runs: a step that fails half-way is undone
+  // too, so an undo must do the right thing whatever the step got done. The plan may run one itself (undo(n)); the rest
+  // run when the walk ends, after Stop, an error or the browser closing, last change first, without asking. An undo
+  // works on the database or an API, never the page: the browser may be gone by then.
+  const undos = [];
+  const undone = [];
+  const undoCtx = () => ({
+    state: ctx.state, data: ctx.data, base, url: ctx.url, log: ctx.log,
+    poll: (fn, opts) => poll(fn, opts),
+  });
+  const runUndo = async (u, by, inStep) => {
+    let timer = null;
+    let error = null;
+    try {
+      await Promise.race([u.run(undoCtx()), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(format(t.undoTimeout, { s: UNDO_TIMEOUT_MS / 1000 }))), UNDO_TIMEOUT_MS);
+      })]);
+    } catch (e) {
+      error = firstLine(e);
+    } finally {
+      clearTimeout(timer);
+    }
+    append({ n: u.n, title: u.title, kind: 'undo', answer: error ? 'failed' : 'done', by, inStep, what: u.what, error: error || undefined });
+    console.log(`[${u.n}] undo ${error ? 'failed' : 'done'} (${by}${inStep ? ' ' + inStep : ''})${error ? ' — ' + error : ''}`);
+    undone.push({ ...u, error });
+    return error;
+  };
+  ctx.undo = async n => {
+    const i = undos.findIndex(u => u.n === Number(n));
+    if (i < 0) return false;
+    const [u] = undos.splice(i, 1);
+    const error = await runUndo(u, 'plan', currentStep ? currentStep.n : undefined);
+    if (error) throw new Error(format(t.undoFailedPlan, { n: u.n, error }));
+    return true;
+  };
+  const undoRest = async by => {
+    while (undos.length) await runUndo(undos.pop(), by);
+  };
+
+  for (const name of ['goto', 'mark', 'text', 'secretBox', 'inPage', 'probe', 'poll', 'visible', 'count', 'submit', 'download', 'sleep', 'undo']) {
     const helper = ctx[name];
     ctx[name] = async (...args) => {
       if (stopRequested) throw new Error(STOPPED);
@@ -1205,7 +1249,8 @@ async function walk(o) {
         let decision = reason ? 'skip' : null;
         if (!decision) {
           const res = await ask(panelFor(n, s, {
-            accent: COLORS.warn, title: `${t.approveTitle}: ${s.title}`, did: t.approveIntro, expect: [what], shot: false,
+            accent: COLORS.warn, title: `${t.approveTitle}: ${s.title}`, did: t.approveIntro, shot: false,
+            expect: [what, ...(s.undo ? [format(t.undoLine, { what: s.undo.what })] : [])],
             expectLabel: t.change,
             buttons: [
               { label: approve.yes || t.approveYes, value: 'approved', color: COLORS.yes },
@@ -1215,7 +1260,13 @@ async function walk(o) {
           }));
           decision = res.a;
           if (decision === 'stop') { record({ n, title: s.title, kind: 'approve', answer: 'stop', seconds: res.seconds, browserErrors: seen.take(), network: await takeNetwork() }); stopped = true; break; }
-          if (decision === 'approved') record({ n, title: s.title, kind: 'approve', answer: 'approved', what, seconds: res.seconds });
+          if (decision === 'approved') {
+            record({ n, title: s.title, kind: 'approve', answer: 'approved', what, seconds: res.seconds });
+            if (s.undo) {
+              undos.push({ n, title: s.title, what: s.undo.what, run: s.undo.run });
+              append({ n, title: s.title, kind: 'undo', answer: 'registered', what: s.undo.what });
+            }
+          }
         }
         if (decision !== 'approved') {
           record({ n, title: s.title, kind: 'approve', answer: 'skip', reason: reason || 'declined', what });
@@ -1281,6 +1332,16 @@ async function walk(o) {
     meta.result = stopped ? 'stopped' : 'completed';
     saveMeta();
 
+    // ---- undo what is left, last change first ----
+    if (undos.length) {
+      if (!closed) {
+        await draw({ header: format(t.step, { n: total, total }), accent: COLORS.info, t, didLabel: t.did, expectLabel: t.undoList,
+          title: t.undoingTitle, did: t.undoingDid, expect: undos.slice().reverse().map(u => `${u.n}. ${u.what}`), shot: false, buttons: [] });
+      }
+      await undoRest(closed ? 'close' : stopped ? 'stop' : 'end');
+    }
+    const undoFailed = undone.filter(u => u.error);
+
     // ---- closing screen ----
     const closing = closed ? { a: 'close' } : await ask({
       header: format(t.step, { n: total, total }), accent: COLORS.info, t, didLabel: t.did, expectLabel: t.outcome,
@@ -1288,7 +1349,9 @@ async function walk(o) {
       expect: [format(t.doneSummary, counts), ...(counts.auto ? [format(t.doneAuto, counts)] : []),
         ...(counts.against ? [format(t.doneAgainst, counts)] : []), ...(counts.errorSteps ? [format(t.doneErrors, counts)] : []),
         ...(counts.networkCritical ? [format(t.doneNetworkCritical, counts)] : counts.networkSteps ? [format(t.doneNetwork, counts)] : []),
-        ...(counts.probeTries ? [format(t.doneProbe, counts)] : [])],
+        ...(counts.probeTries ? [format(t.doneProbe, counts)] : []),
+        ...(undone.length ? [format(t.doneUndo, { done: undone.length - undoFailed.length, total: undone.length })] : []),
+        ...undoFailed.map(u => format(t.doneUndoFailed, u))],
       buttons: [
         { label: t.close, value: 'close', color: COLORS.info },
         ...(options.fresh ? [] : [{ label: t.signOut, value: 'signout', color: COLORS.stop }]),
@@ -1304,6 +1367,8 @@ async function walk(o) {
     meta.result = 'error';
     meta.error = firstLine(e);
     saveMeta();
+    // The test data comes first: put back what the allowed steps changed before anything else can fail.
+    await undoRest('error');
     await tracePause();
     await closeBrowser();
     dropFreshProfile();
