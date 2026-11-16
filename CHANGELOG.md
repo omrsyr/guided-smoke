@@ -22,6 +22,20 @@
     not. A plan that names another database asks for itself, and an account the server refuses later is asked for
     again, with the names as typed. The report of a plan that was not asked says "as answered earlier in the suite".
     The account is written to no file, as before, and is dropped when the suite ends.
+- **Plans from a work item, for a tester who was not there when the change was made.** The workflow now says how to
+  make a plan from a work item alone (the item, the commits linked to it, the repository), and what to do with a thin
+  one: a draft from the diff, at most three questions with defaults, never a plan written from the code in silence.
+  - Every expectation carries where it comes from: 📋 the work item, 🔧 the code, 👤 the user, ❓ an assumption, in the
+    plan shown in the chat and as comments in the plan file. Such a plan is shown with the count ("20 of 26
+    expectations come from the code") and a coverage table of the acceptance criteria.
+  - What a diff does not show: other flows that write the changed data get a regression step, and the environment's
+    checks (a script applied, a setting) are steps of the plan when someone else will walk it.
+  - A plan others will walk is kept in the repository, with the test server as an environment; its folder is a suite.
+  - A short "Smoke" part (where, who, test data, outside the page, not a smoke) makes a work item ready for a smoke.
+- **New patterns.** Calling the application's own API as the user who is signed in: no box and nothing typed, the
+  call runs in the page and the token stays there, with a table for "the box, or the session?". A value the user
+  gives put into a form of the page (a test user's password, typed into the box and placed by the step). Counting by
+  id where the database's clock cannot be used, and a soft delete as clean-up.
   - The suite's record and report are kept as `suites/<folder>-<n>/` in the project's data folder, numbered and never
     overwritten: a row per plan with its walk, how it ended, its counts, time and what its own report flags; where the
     suite was stopped, the plans not walked or ended with an error, changes not put back; every ✖ with its note; a

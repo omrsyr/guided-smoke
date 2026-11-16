@@ -63,8 +63,8 @@ The step context (`ctx`) offers:
 `check` returns `true/false`, `[ok, text]`, `[ok, okText, failText]` or `{ ok, text }`. If `run` or `check` throws,
 the panel shows the error as a failed check and the user decides.
 
-For an API that needs the user's account, the project's database tool, or a background job, see
-[patterns](patterns.md).
+For an API (called with an account of its own, or as the user who is signed in), a value of the user's put into a
+form, the database, or a background job, see [patterns](patterns.md).
 
 ## Rules
 
@@ -85,9 +85,11 @@ For an API that needs the user's account, the project's database tool, or a back
    panel then heads `expect` with "What to expect" instead of pointing at an orange outline.
 5. **Check whenever it can be checked.** The automatic check is a second pair of eyes, not a replacement for the user.
 6. **Order:** setup → happy path → validation errors → edge cases (expired, limits, empty) → confirmations and
-   permissions → help pages → the other language → clean-up. A step may rely on the previous ones; `--from`/`--only`
-   then need the earlier changes in place (the panel says so).
-7. **Use test records.** Write ids into the plan; never act on records the user did not choose for testing.
+   permissions → help pages → the other language (where the application has one) → clean-up. A step may rely on the
+   previous ones; `--from`/`--only` then need the earlier changes in place (the panel says so).
+7. **Use test records.** Write ids into the plan; never act on records the user did not choose for testing. What the
+   plan creates, it removes, the way the application removes things: where the application only marks a record
+   deleted, that mark is the clean-up, and the checks count the records still active.
 8. **Irreversible screen actions** (suspend, delete, send): either click the dialog's "No/Cancel" and verify the dialog
    only, or make the step a permitted one (`approve`) so the user agrees first.
 9. **Permitted steps** (`approve`) for anything outside the page — see [safety](safety.md). Use `skipTo: <n>` when the
@@ -115,7 +117,12 @@ For an API that needs the user's account, the project's database tool, or a back
 13. **Stable selectors:** ids, `data-*`, form `action*="handler=…"`, a row filtered by its exact cell text. Avoid
     positions (`nth`) unless the order is the thing being tested.
 14. **Values the user must give** (an account for an API call) go into `secretBox`, never into the plan, a constant,
-    an environment variable or the chat. See [patterns](patterns.md#calling-an-api-with-the-users-account).
+    an environment variable or the chat. See [patterns](patterns.md#calling-an-api-with-the-users-account). A
+    password for a test record the plan creates (a test user) is such a value too, however throw-away: the user
+    types it into the box and the step puts it into the form
+    ([patterns](patterns.md#a-value-the-user-gives-put-into-a-form-of-the-page)). The application's own API, called
+    as the user who is signed in, needs no value at all
+    ([patterns](patterns.md#calling-the-applications-own-api-as-the-signed-in-user)).
 15. **The application's own dialogs.** While a modal `<dialog>` is open, the panel and the value box move inside the
     one on top, so they stay clickable; their clicks and keys stop there and never reach the page's handlers. A dialog
     styled with `transform`, `filter` or `contain` carries them along: they are placed and clipped against it. If the

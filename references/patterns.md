@@ -5,7 +5,9 @@ Shapes that recur in real plans. Copy the shape; routes, tools and queries are t
 ## Calling an API with the user's account
 
 When a step must call an endpoint that needs an account (a client or machine API, a token sign-in), the user types
-the account into a box on the page and the call runs inside the page. The script never sees the values.
+the account into a box on the page and the call runs inside the page. The script never sees the values. For the
+application's own API, called as the user who is already signed in, no account is typed: see
+[the next pattern](#calling-the-applications-own-api-as-the-signed-in-user), and its table for which one to use.
 
 ```js
 {
@@ -54,6 +56,94 @@ the account into a box on the page and the call runs inside the page. The script
 - `url(path)` turns a path of the application into the path to call, keeping `base`'s own path: under an IIS
   application (`https://test01/App`) `url('/api/login')` is `/App/api/login`. A bare `fetch('/api/login')` would go
   to the server's root and miss the application there.
+
+## Calling the application's own API as the signed-in user
+
+When the API under test is the one the page itself calls, the browser already holds what the call needs: the
+session. Nothing is typed and no box is drawn; the call runs inside the page with `inPage`, as the page's own calls
+do, and the panel shows it like a line of an API client: `POST /api/models → 201 (17 ms)`.
+
+```js
+// Runs in the page. What the application signs its calls with stays there: only the outcome comes back.
+const call = async ({ arg, url }) => {
+  const token = sessionStorage.getItem('access_token');       // where this application keeps it; see below
+  const started = performance.now();
+  const r = await fetch(url(arg.route), {
+    method: arg.method, credentials: 'include',
+    headers: { ...(arg.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: arg.body ? JSON.stringify(arg.body) : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  return { http: r.status, ms: Math.round(performance.now() - started), id: j.id ?? null, total: Array.isArray(j.items) ? j.items.length : null };
+};
+
+{
+  title: 'POST adds the model',
+  approve: { what: 'Send POST /api/models { model: "SMOKE-API 1" }: one test record is added.' },
+  undo: { what: 'The SMOKE-API records are removed again.', run: async ({ sql }) => { /* by the prefix; see below */ } },
+  did: 'I sent POST /api/models with the model "SMOKE-API 1", as the user who is signed in.',
+  expect: ['Automatic check: POST /api/models → 201.'],
+  run: async ({ inPage, state }) => {
+    state.added = await inPage(call, { method: 'POST', route: '/api/models', body: { model: 'SMOKE-API 1' } });
+  },
+  check: async ({ state }) => [state.added.http === 201, `POST /api/models → ${state.added.http} (${state.added.ms} ms)`],
+},
+```
+
+- **Where the session is** differs per application; find it once while writing the plan (the browser's developer
+  tools, Application ▸ Storage, or the application's own HTTP client in the repository):
+  a session cookie needs nothing read (`credentials: 'include'`, and same-origin calls send it anyway); a
+  single-page application that signs in through an identity provider keeps a token in `sessionStorage` or
+  `localStorage`, often inside a JSON entry of its sign-in library (`JSON.parse(sessionStorage.getItem(key)).access_token`);
+  an anti-forgery token sits in a `<meta>` tag or a cookie and goes into the header the application's own calls use.
+  Let the lookup fail clearly: `if (!token) return { error: 'No session token where the plan looks for it.' }`.
+- **The token never leaves the page.** Return what the next steps need (a status, a time, a count, the id of the test
+  record the step made), never the token, a cookie or an answer's whole body. There is no box, so nothing is masked.
+- A call that changes data is a permitted step with an `undo`, like any change outside the screen; a `GET` is a plain
+  step. An API's error answer (a 400 that is the point of the step) shows under the step as a failed request: say so
+  in `expect` (writing-steps rule 16).
+- A step with only an API call has nothing to outline: leave `mark()` out, or reload and mark the row the call made.
+
+**The box, or the session?**
+
+| The step calls | Use |
+|---|---|
+| the application's own API, as the user who is signed in | the session, as above: nothing to type |
+| an API with an account of another kind: a client or machine API (a client id and secret, an API key, a device key), a token endpoint | the value box (`secretBox`): the user types the account, as in the first pattern |
+| an API outside the application (another origin) | the value box, when that API's CORS and the application's CSP allow the call from the page; otherwise the project's own tool, called from the plan |
+| the same API as another user (a role that must get a 403) | neither: a walk of its own, signed in as that user (`--fresh`); a second factor or an identity provider cannot be typed into a box |
+
+## A value the user gives, put into a form of the page
+
+A test record that needs a secret of its own (a test user's password) gets it from the user, never from the plan,
+not even a throw-away one. Asking the user to type into the page's own field works badly: the panel moves on while
+they type, or they type into the wrong field. Let them type into the box; the step puts the value into the form and
+checks it before anything is sent.
+
+```js
+{
+  title: 'Test user form filled in',
+  did: 'I filled in the "New user" form for smoke-user-1 and put the password you typed into the box into its "Password" field.',
+  expect: ['The form shows the user name smoke-user-1 and dots in "Password". Nothing is sent yet.'],
+  run: async ({ page, secretBox, inPage, mark, state }) => {
+    await page.fill('#UserName', 'smoke-user-1');
+    await secretBox({ title: 'Test user', fields: [{ name: 'password', label: 'Password for the test user', secret: true }] });
+    state.filled = await inPage(({ fields }) => {             // waits, with the panel saying so, until the box is filled in
+      const input = document.querySelector('#Password');
+      input.value = fields.password;
+      input.dispatchEvent(new Event('input', { bubbles: true }));   // the event the form's framework listens to
+      return { length: input.value.length };
+    });
+    await secretBox(null);
+    await mark(page.locator('#Password'));
+  },
+  check: async ({ state }) => [state.filled.length >= 8, 'The password field is filled in.', 'The password field is empty or shorter than 8 characters.'],
+},
+```
+
+- The next step sends the form. When that cannot be undone (an account that cannot be deleted), make it a permitted
+  step: the user has seen the filled form first.
+- Return a length or a yes/no, never the value. Remove the box as soon as the value is placed.
 
 ## Reading and writing the database
 
@@ -111,7 +201,12 @@ const rowsAffected = out => Number((out.match(/^\s*(\d+)\s*$/m) || [])[1]);
 - Connection strings stay in the tool's configuration: the plan neither reads nor prints them. With `db` there is
   none: the server and database names are in the plan, the account only in the engine's memory.
 - To count only what the walk itself caused, read the database's own clock into `state` before the first action
-  and filter by it. The script's clock and time zone may differ from the server's.
+  and filter by it. The script's clock and time zone may differ from the server's. Where the application writes the
+  time itself (its own clock, another zone) or the rows cannot be told apart by a name (an encrypted column), read
+  the table's highest id into `state` instead and count the rows above it.
+- Clean up the way the application removes things. Where it only marks a record deleted (a soft delete), marking it
+  is the clean-up: checks count the records still active, and `expect` says "no active SMOKE record", not "no row".
+  Do not delete rows the application itself would keep.
 
 ## Triggering a background job and waiting for its effect
 

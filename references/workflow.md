@@ -25,6 +25,46 @@ slug when there is one; without a work item a short name (`login-flow`). Never e
 reads as a walk. Pass the work item as the tracker writes it (`--work-item PROJ-123`); the report puts `#` only
 before a number.
 
+### From a work item alone (`guided-smoke plan 6655`)
+
+A tester often starts from the work item, without the session that made the change. Read in this order:
+
+1. **The work item:** description, acceptance criteria, comments (a technical summary, a "how to test" note). Use
+   the user's own way in: `gh issue view`, a tracker skill or connector, or the text pasted into the chat. Read only.
+2. **The change:** the commits and pull requests linked to it, or naming it as its tracker links them, and their diff.
+3. **The repository:** the screens' texts (localisation files, views), the validation rules, the scripts the change
+   brought.
+
+A work item rarely says what a plan also needs: where the application runs and who signs in, the screens' exact
+texts, which test records to use, what changes outside the page and how it is put back. Take them from the
+repository and the environment (step 2 below), and ask for what neither holds.
+
+### A thin work item
+
+A title and little else. Do not refuse it, and do not write the plan from the code in silence: a plan read from the
+code checks that the code does what the code does.
+
+1. Draft the plan from the diff and the repository.
+2. Ask at most three questions, only where the answer changes the plan, each with a default the user can accept:
+   what the change is for, in a sentence · which roles see it and whether a test account exists for each · which test
+   records to use (the plan's own, or existing ones and how to recognise them) · what the change touches outside the
+   page.
+3. Mark where each expectation comes from (step 3 below), so the user sees how much of the plan is the code's word.
+
+### A work item that is ready for a smoke
+
+When a project's work items are thin again and again, suggest once that they carry a short "Smoke" part. Free text
+is enough; nothing parses it, and every tracker can hold it:
+
+- **Where:** the menu path or the screen the change shows on.
+- **Who:** the roles that see it, and whether a test account exists for each.
+- **Test data:** the records to use, or that the smoke makes its own, and how to recognise them.
+- **Outside the page:** what the change writes elsewhere (a table, a mail, a job), and how a test puts it back.
+- **Not a smoke:** the criteria no screen shows (a script safe to run twice, the shape of a log line), so that a plan
+  can say why it leaves them out.
+
+Suggest the text; the skill never writes to a tracker.
+
 ## 2. Preflight (before writing steps)
 
 Check, do not assume:
@@ -41,6 +81,8 @@ Check, do not assume:
   test records in `data` ([writing steps](writing-steps.md) rule 19).
 - **Database / migrations:** if the project uses manual migration scripts and the branch (or a pull) brought new ones,
   check read-only whether their objects exist on the target database. Missing scripts are the user's call to run.
+  When someone else will walk the plan, or it will be walked elsewhere, make that check the plan's first step: a
+  look taken once here says nothing about the tester's environment.
   A plan with `db` needs `sqlcmd` (`doctor` names its version); tell the user the walk will first ask for a database
   account in a tab of its own, unless `login: 'windows'`.
 - **Test data:** find suitable records read-only (an entity in the right state, enough free capacity, an account).
@@ -59,6 +101,36 @@ Check, do not assume:
 [writing steps](writing-steps.md). Take every on-screen text from the application's own sources (localisation files,
 views) so `expect` matches the screen word for word.
 
+**A plan others will walk.** When a tester or a colleague will walk the plan (on a shared test server, before a
+release), keep it in the repository next to the code, where it is reviewed like code: `smoke/<plan-id>.steps.js`, or
+`smoke/<plan-id>/steps.js` with the files it requires. Walk the file (`run smoke/<plan-id>.steps.js`); it is linked
+into the project's plans, not copied. Give it the test server as an environment (writing-steps rule 19), its record
+ids in `data`, an `undo` for every permitted step, and its checks of the environment as first steps. The folder is
+then a suite the tester walks with `run smoke/ --env test`. Ask before adding files to the repository.
+
+**Where each expectation comes from.** An expectation read from the code confirms what the code does; it cannot show
+that the code misread the requirement. Mark each one:
+
+| Mark | From | It says |
+|---|---|---|
+| 📋 | the work item: a criterion, the description, a comment | what was asked for |
+| 🔧 | the code: the diff, a validation rule, a text in the repository | what was built |
+| 👤 | the user, in this conversation | what was asked for |
+| ❓ | an assumption: none of the above says it | nothing yet: to be confirmed |
+
+The marks go into the plan you show in the chat and, as comments, into the plan file (`// 📋 criterion 2 · 🔧 text
+from the localisation file`). The panel does not show them. Probe values have marks of their own
+([probing](probing.md): 🔧 code, 📘 catalog, ❓ assumed).
+
+**What a diff does not show.** A diff holds what changed, not what must stay as it was:
+
+- **Other writers of the same data.** For each thing the change stores (a new field, a field made editable), find
+  the other flows that save the same record: another screen, an import, an API, a job. A flow that writes the record
+  without knowing the new field may empty it. Add a regression step for each one a user can reach (save through the
+  other flow, then the field is still there), or ask whether it matters.
+- **The environment the plan will meet.** A script the change needs, a setting, a role: check it in a first step
+  (see step 2), not in your head.
+
 ## 4. Show the plan, get approval
 
 For probe steps (`plan --probe`, or the user asked to probe a form), show first, per field, the table of values with
@@ -68,6 +140,15 @@ at most three questions that change the plan, and write only the approved values
 In the chat, list the steps as a numbered list: title and one line of what the user will check. Mark probe steps (they
 run only with `--probe`). Mark permitted steps
 (they will ask again in the browser) and say which of them put their change back when the walk ends (`undo`). Say how many steps there are and roughly how long it takes (about 30 s per step).
+
+For a plan made from a work item, also show:
+
+- each step's expectations with their marks, and the count: "20 of 26 expectations come from the code (🔧), 5 from
+  the work item (📋), 1 is an assumption (❓)". A plan that is mostly 🔧 is the code's word: say so, and name the ❓
+  ones for the user to confirm or correct;
+- a coverage table: each acceptance criterion → the steps that cover it, or why the smoke leaves it out (no test
+  account for that role, nothing a screen shows).
+
 Wait for the user's go-ahead. `guided-smoke plan` stops here.
 
 ## 5. Run

@@ -111,9 +111,10 @@ The project is the git repository's folder name (override with `--project`). Dat
 ## Load the applicable guidance
 
 - Always: [safety rules](references/safety.md).
-- `guided-smoke` and `plan`: [workflow](references/workflow.md) and [writing steps](references/writing-steps.md);
-  [patterns](references/patterns.md) when a step calls an API with an account, uses the project's database tool or
-  waits for a background job.
+- `guided-smoke` and `plan`: [workflow](references/workflow.md) (also: a plan from a work item alone, a thin work
+  item, where each expectation comes from) and [writing steps](references/writing-steps.md);
+  [patterns](references/patterns.md) when a step calls an API (with an account of its own, or as the user who is
+  signed in), puts a value of the user's into a form, reads or writes the database or waits for a background job.
 - `plan --probe`, or a request to probe a form ("patlat", "boundary values"): [probing](references/probing.md).
 - `run`: [workflow](references/workflow.md) (preflight and while it runs).
 - `report`, and after every walk: [report](references/report.md).
