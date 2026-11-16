@@ -24,6 +24,8 @@
 - A step that needs an account of its own (an API call) asks the user to type it into the value box (`secretBox`).
   The values stay in the page: the engine never reads them, `inPage` masks them (`•••`) in what it returns, and a
   page load clears them. Masking is a safety net, not a licence: return only statuses and counts.
+- `signIn: 'windows'` lets the browser send the user's Windows account to the host of `base`, and to no other site:
+  the smoke profile's switch names that host alone.
 - A test database account (a plan with `db`, `login: 'sql'`) is typed by the user into the engine's own tab, opened
   before the sign-in at `about:blank`: no page of the application can reach it. This is the one secret the engine
   itself holds, on purpose, since the browser cannot reach a SQL Server: it stays in this process's memory for the

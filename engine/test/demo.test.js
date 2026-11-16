@@ -797,6 +797,100 @@ test('the test database: its own tab before the sign-in asks again after a refus
   }
 });
 
+test('doctor --base says what the browser meets: the answer, a sign-in page, the server, a closed port', { skip, timeout: 90000 }, async () => {
+  const { execFile } = require('child_process');
+  const doctor = url => new Promise(resolve => execFile(process.execPath, [path.join(__dirname, '..', 'run.js'), 'doctor', '--base', url, '--browser', chosen.name],
+    { encoding: 'utf8' }, (e, stdout, stderr) => resolve({ code: e ? e.code : 0, site: stdout.split('\nsite:\n')[1] || '', stderr })));
+  const app = http.createServer((req, res) => {
+    const app = req.url.startsWith('/app');
+    res.writeHead(app ? 302 : 200, { 'Content-Type': 'text/html', Server: 'test-server/1.0', ...(app ? { Location: '/account/login?next=/app' } : {}) });
+    res.end('<!doctype html><title>t</title><h1>sign in</h1>');
+  });
+  const closed = http.createServer();
+  for (const s of [app, closed]) await new Promise(resolve => s.listen(0, '127.0.0.1', resolve));
+  const closedPort = closed.address().port;
+  await new Promise(resolve => closed.close(resolve));
+  try {
+    const ok = await doctor(`http://127.0.0.1:${app.address().port}/app`);
+    assert.strictEqual(ok.code, 0, ok.stderr);
+    assert.match(ok.site, /^ {2}answer: 200 in \d+ ms$/m);
+    assert.match(ok.site, /^ {2}final: http:\/\/127\.0\.0\.1:\d+\/account\/login\?next=\/app$/m);
+    assert.match(ok.site, /^ {2}certificate: none \(http\)$/m);
+    assert.match(ok.site, /^ {2}auth: none seen$/m);
+    assert.match(ok.site, /^ {2}signInPage: the address leads to a sign-in page/m);
+    assert.match(ok.site, /^ {2}server: test-server\/1\.0$/m);
+    const none = await doctor(`http://127.0.0.1:${closedPort}/`);
+    assert.strictEqual(none.code, 1);
+    assert.match(none.site, /answer: no answer: ERR_CONNECTION_REFUSED — nothing listens there/);
+    assert.match(none.site, /next: the walk cannot start here/);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+  }
+});
+
+// A site that asks for a Windows sign-in and takes none: Chrome and Edge on Windows answer it as they answer a full
+// name they were not told to trust (the walk's browser elsewhere has no Windows account to send).
+const windowsOnly = skip || (process.platform !== 'win32' && 'a Windows sign-in is tried on Windows only');
+test('a Windows sign-in: signIn: \'windows\' lets the browser send the account to the host; a refused one stops the walk with what to do; doctor names it', { skip: windowsOnly, timeout: 90000 }, async () => {
+  const site = http.createServer((req, res) => {
+    res.setHeader('WWW-Authenticate', ['Negotiate', 'NTLM']);
+    res.writeHead(401, { 'Content-Type': 'text/html', Server: 'Microsoft-IIS/10.0' });
+    res.end('denied');
+  });
+  await new Promise(resolve => site.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${site.address().port}/App`;
+  const plan = { id: 'windows', ready: '#page', steps: [{ title: 'a', did: 'x', expect: ['x'], run: async () => {} }] };
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  try {
+    const plain = await autoWalk({ playwright, plan, browser: chosen, base, lang: 'en', walkDir, options: { env: 'test' } }).catch(e => e);
+    assert.match(plain.message, /^127\.0\.0\.1 asks for a Windows sign-in, .* Add signIn: 'windows' to envs\.test and walk again\.$/);
+    const launched = [];
+    const allowed = await autoWalk({ playwright, plan, browser: chosen, base, lang: 'en', walkDir, launched, options: { signIn: 'windows' } }).catch(e => e);
+    assert.ok(launched[0].includes('--auth-server-allowlist=127.0.0.1'), JSON.stringify(launched));
+    assert.match(allowed.message, /^The Windows sign-in to 127\.0\.0\.1 failed although the browser was allowed to send it/);
+    assert.strictEqual(JSON.parse(fs.readFileSync(path.join(walkDir, 'walk.json'), 'utf8')).signIn, 'windows');
+    const { execFile } = require('child_process');
+    const out = await new Promise(resolve => execFile(process.execPath, [path.join(__dirname, '..', 'run.js'), 'doctor', '--base', base, '--browser', chosen.name],
+      { encoding: 'utf8' }, (e, stdout) => resolve(stdout)));
+    assert.match(out, /auth: Windows \(Negotiate, NTLM\): refused even when allowed/);
+    assert.match(out, /server: Microsoft-IIS\/10\.0/);
+  } finally {
+    await new Promise(resolve => site.close(resolve));
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+test('appVersion is read once after the sign-in, kept short, and the walk goes on from the start page; a failure is recorded, not fatal', { skip, timeout: 60000 }, async () => {
+  const app = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(req.url === '/about'
+      ? `<!doctype html><title>t</title><p id="v">  Version
+        2.3.1 (build 455) ${'x'.repeat(60)}</p>`
+      : '<!doctype html><title>t</title><h1 id="page">start</h1>');
+  });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const step = { title: 'Where am I', did: 'x', expect: ['x'], run: async ({ page, state }) => { state.at = new URL(page.url()).pathname; },
+    check: async ({ state }) => [state.at === '/', state.at] };
+  const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+  try {
+    const read = { id: 'version', ready: '#page', steps: [step],
+      appVersion: async ({ goto, page, text }) => { await goto('/about'); return text(page.locator('#v')); } };
+    const { meta } = await autoWalk({ playwright, plan: read, browser: chosen, base, lang: 'en', walkDir });
+    assert.strictEqual(meta.appVersion, `Version 2.3.1 (build 455) ${'x'.repeat(14)}`);
+    assert.strictEqual(meta.appVersion.length, 40);
+    assert.ok(readEvents(walkDir)[0].auto.ok, 'step 1 starts on the start page again');
+    fs.rmSync(walkDir, { recursive: true, force: true });
+    fs.mkdirSync(walkDir);
+    const broken = { ...read, appVersion: async () => { throw new Error('no #version on the page'); } };
+    const second = await autoWalk({ playwright, plan: broken, browser: chosen, base, lang: 'en', walkDir });
+    assert.deepStrictEqual([second.meta.result, second.meta.appVersion, second.meta.appVersionError], ['completed', undefined, 'no #version on the page']);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+    fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
 test('an environment sets the start page and the test records the steps read; the walk records its name', { skip, timeout: 60000 }, async () => {
   const { pickEnv } = require('../envs');
   const app = http.createServer((req, res) => {

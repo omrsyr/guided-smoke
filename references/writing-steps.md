@@ -18,9 +18,10 @@ module.exports = {
   data: { order: 1001 },            // optional: the test records the steps use (ctx.data)
   db: { server: 'localhost', database: 'Orders', login: 'windows' },   // optional: the test database for sql() (rule 20)
   envs: {                           // optional: other environments, picked with --env (rule 19)
-    test: { base: 'https://test01/Orders', start: '/orders/2001', data: { order: 2001 },
-      db: { server: 'sqltest01', database: 'OrdersTest', login: 'sql' } },
+    test: { base: 'https://test01.corp.example/Orders', start: '/orders/2001', data: { order: 2001 },
+      signIn: 'windows', db: { server: 'sqltest01', database: 'OrdersTest', login: 'sql' } },
   },
+  appVersion: async ({ page, text }) => text(page.locator('#app-version')),   // optional: read once after the sign-in (rule 21)
   steps: [ /* … */ ],
 };
 ```
@@ -157,6 +158,12 @@ For an API that needs the user's account, the project's database tool, or a back
     environments with a module of their own: `envs: require('../envs')`. The walk records the environment's name; its
     report names it and compares only with earlier walks in the same environment, and `--retry-failed` reruns the ✖
     steps of the newest walk there. The remote-address rule for permitted steps is unchanged.
+
+    `signIn: 'windows'` (in the plan or an environment) is for a site that signs in with the Windows account (IIS
+    Windows authentication). Chrome and Edge send that account by themselves to `localhost` and a bare machine name,
+    but not to a full name (`test01.corp.example`): there the page fails at once with no dialog, and the walk stops
+    saying to add `signIn: 'windows'`. With it the browser may send the account to the host of `base`, and only there.
+    `node run.js doctor --base <url>` shows beforehand whether the site asks for it and whether it then signs in.
 20. **The test database (`db`, `sql()`, `db: true`).** A plan or environment with `db: { server, database, login }`
     (SQL Server, through `sqlcmd`) gets `sql(query)` in its steps and undos. With `login: 'sql'` (the default) the
     engine opens a tab of its own before the sign-in, shows the server and the database, and the **user** types an
@@ -171,3 +178,8 @@ For an API that needs the user's account, the project's database tool, or a back
     missing, a query): sqlcmd's message may hold data and is never shown. Write fixed query text with ids from `data`
     or `state`, select only counts and states, and put no row into `did`, `expect`, a check text or `log`. A write is
     a permitted step with an `undo` (rule 9). See [patterns](patterns.md#reading-and-writing-the-database).
+21. **The application's version (`appVersion`).** On a shared test server, say which build was walked: the plan's
+    `appVersion(ctx)` runs once after the sign-in and returns a short text (a footer, an about page, a version API
+    through `inPage`). The report's header and the first line of the paste block carry it, cut to 40 characters. If
+    it opens another page, the walk goes back to the start page before step 1. A failure is recorded as "not read"
+    and the walk goes on.

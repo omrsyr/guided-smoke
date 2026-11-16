@@ -30,7 +30,10 @@ before a number.
 Check, do not assume:
 
 - **Runtime:** `node run.js doctor`. Runtime missing → tell the user `setup` installs `playwright-core` from npm into
-  the data folder and run it after they agree.
+  the data folder and run it after they agree. Without access to the public npm registry (a closed network): npm
+  honours the company's registry or proxy (`npm config set registry <internal registry>`, or `HTTPS_PROXY`), or copy
+  the data folder's `runtime` folder from a machine of the same operating system that has it (`node run.js paths`
+  names it on both).
 - **The application runs the new code:** the running process started after the last change (compare the process start
   time with the last build or file change), or ask the user to restart it. An old process makes every step lie.
 - **Address:** the port the application listens on (process ports, launch settings). Pass it as `--base` or put it in
@@ -42,6 +45,13 @@ Check, do not assume:
   account in a tab of its own, unless `login: 'windows'`.
 - **Test data:** find suitable records read-only (an entity in the right state, enough free capacity, an account).
   Use test records; write their ids into the plan, not the user's real data.
+- **A shared test server** (an environment that is not this machine), before the first walk there:
+  1. `node run.js doctor --base <url>`: it answers, its certificate, whether it asks for a Windows sign-in (then
+     `signIn: 'windows'` in the environment), whether it leads to a sign-in page, its server.
+  2. The build: give the plan an `appVersion` and ask the user whether that build carries the change.
+  3. The schema: make step 1 of the plan a read-only check that the objects the change needs exist (`sql()` counting
+     them, `db: true`), so a missing migration shows at once instead of as a wrong screen later.
+  4. Each permitted step gets an `undo`: the next tester finds the records as they were.
 
 ## 3. Write the plan
 

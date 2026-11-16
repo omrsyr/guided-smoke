@@ -83,6 +83,8 @@ All work goes through `node <skill-dir>/engine/run.js` (`<skill-dir>` is this fi
 
 ```text
 node run.js doctor                    data folder, project, chosen browser, runtime, sqlcmd — run this first
+node run.js doctor --base <url>       also open the address in a headless browser: answer, certificate, Windows
+                                      sign-in, sign-in page, server (before a walk on a test server)
 node run.js setup                     install playwright-core once (asks npm; get the user's OK first)
 node run.js setup --video             also fetch Playwright's ffmpeg for --video (about 4 MB; get the user's OK first)
 node run.js init <plan-id> [--title T] [--work-item N]   create plans/<plan-id>/steps.js from the template

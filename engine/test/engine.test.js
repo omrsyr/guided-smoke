@@ -17,7 +17,7 @@ const probing = require('../probe');
 const { texts } = require('../i18n');
 const { checkEnvs, pickEnv } = require('../envs');
 const sqlDb = require('../db');
-const { appUrl, isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
+const { appUrl, signInError, isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
 const RUN = path.join(__dirname, '..', 'run.js');
 const P = 'demo';
 
@@ -102,10 +102,10 @@ test('environments: the plan is its own, envs override base, start and data, and
   const plan = { base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' },
     envs: { test: { base: 'https://test01/App', data: { order: 2001 } }, uat: { start: '/home' } } };
   assert.strictEqual(checkEnvs(plan), null);
-  assert.deepStrictEqual(pickEnv(plan, undefined), { name: null, base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' }, db: null });
-  assert.deepStrictEqual(pickEnv(plan, 'test'), { name: 'test', base: 'https://test01/App', start: '/orders/1001', data: { order: 2001, user: 'smoke' }, db: null });
-  assert.deepStrictEqual(pickEnv(plan, 'uat'), { name: 'uat', base: 'https://localhost:5001', start: '/home', data: { order: 1001, user: 'smoke' }, db: null });
-  assert.deepStrictEqual(pickEnv({ steps: [] }, undefined), { name: null, base: null, start: '/', data: {}, db: null });
+  assert.deepStrictEqual(pickEnv(plan, undefined), { name: null, base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' }, db: null, signIn: null });
+  assert.deepStrictEqual(pickEnv(plan, 'test'), { name: 'test', base: 'https://test01/App', start: '/orders/1001', data: { order: 2001, user: 'smoke' }, db: null, signIn: null });
+  assert.deepStrictEqual(pickEnv(plan, 'uat'), { name: 'uat', base: 'https://localhost:5001', start: '/home', data: { order: 1001, user: 'smoke' }, db: null, signIn: null });
+  assert.deepStrictEqual(pickEnv({ steps: [] }, undefined), { name: null, base: null, start: '/', data: {}, db: null, signIn: null });
   // An environment's db replaces the plan's whole: a test server's database is another one.
   const withDb = { db: { server: 'localhost', database: 'App' }, envs: { test: { db: { server: 'sql01', database: 'AppTest', login: 'windows' } }, uat: {} } };
   assert.deepStrictEqual(pickEnv(withDb, 'test').db, { server: 'sql01', database: 'AppTest', login: 'windows' });
@@ -115,7 +115,8 @@ test('environments: the plan is its own, envs override base, start and data, and
   for (const [bad, msg] of [
     [{ envs: {} }, /at least one environment/],
     [{ envs: { test: { base: 'test01' } } }, /envs\.test: base "test01" is not a URL/],
-    [{ envs: { test: { url: 'https://x' } } }, /envs\.test has an unknown key "url"\. An environment knows: base, start, data, db\./],
+    [{ envs: { test: { url: 'https://x' } } }, /envs\.test has an unknown key "url"\. An environment knows: base, start, data, db, signIn\./],
+    [{ envs: { test: { signIn: 'kerberos' } } }, /envs\.test: signIn takes 'windows'/],
     [{ envs: { test: { db: { server: 'sql01' } } } }, /envs\.test: db must be \{ server: 'sql01', database: 'AppTest', login: 'sql' \| 'windows' \}/],
     [{ db: { server: 'sql01', database: 'AppTest', login: 'kerberos' } }, /the plan: db must be/],
     [{ db: { server: 'sql01', database: 'AppTest', password: 'x' } }, /the plan: db must be/],
@@ -294,6 +295,43 @@ test('the report says whether the walk had its database, and why a step that nee
   assert.match(md, /\| 1 \| Count \| ⏭ skipped \(no database\) \|/);
   assert.match(report.build({ ...meta, db: 'sql', lang: 'tr' }, [], null).markdown, /\*\*Veritabanı:\*\* SQL hesabıyla bağlandı/);
   assert.doesNotMatch(report.build(meta, [], null).markdown, /Database/, 'a plan without a database: no line');
+});
+
+test('a Windows sign-in the browser did not send says what to add; one refused although allowed says where to look', () => {
+  const failed = 'page.goto: net::ERR_INVALID_AUTH_CREDENTIALS at https://test01.corp.example/App/';
+  assert.match(signInError(failed, { base: 'https://test01.corp.example/App', env: 'test' }),
+    /^test01\.corp\.example asks for a Windows sign-in, .* Add signIn: 'windows' to envs\.test and walk again\.$/);
+  assert.match(signInError(failed, { base: 'https://test01.corp.example/App' }), /Add signIn: 'windows' to the plan/);
+  assert.match(signInError(failed, { signIn: 'windows', base: 'https://test01.corp.example/App' }),
+    /^The Windows sign-in to test01\.corp\.example failed although the browser was allowed to send it: .*doctor --base https:\/\/test01\.corp\.example\/App/);
+  assert.strictEqual(signInError('page.goto: net::ERR_CONNECTION_REFUSED', { base: 'https://test01' }), null);
+  // The plan's signIn reaches the walk like its other environment keys.
+  assert.strictEqual(pickEnv({ signIn: 'windows', envs: { local: { base: 'http://localhost:5000' } } }, 'local').signIn, 'windows');
+});
+
+test('appVersion is a function; the report and the paste block carry what it read, or why it could not', () => {
+  const id = '7008-app-version';
+  fs.mkdirSync(store.planDir(P, id), { recursive: true });
+  fs.writeFileSync(store.planFile(P, id), "module.exports = { base: 'http://localhost:1', appVersion: '2.3', steps: [{ title: 'a', run: async () => {} }] };");
+  const r = cli('run', id);
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /appVersion must be a function/);
+  const meta = { totalSteps: 1, titles: ['Open'], lang: 'en', walkId: 'v-1', planId: 'v', readyAt: '2026-11-03T08:00:00Z',
+    result: 'completed', browser: 'chrome', browserSource: 'requested', base: 'https://test01/App', env: 'test' };
+  const events = [{ n: 1, title: 'Open', answer: 'pass' }];
+  const md = report.build({ ...meta, appVersion: '2.3.1 $& (build 455)' }, events, null).markdown;
+  assert.match(md, /\*\*Application version:\*\* 2\.3\.1 \$& \(build 455\)\n/);
+  assert.match(md, /\nSmoke on test \(2026-11-03, 1\/1; app 2\.3\.1 \$& \(build 455\); guided-smoke v-1\)\n/, 'the text is taken as it is');
+  assert.match(report.build({ ...meta, appVersionError: 'version element not found' }, events, null).markdown,
+    /\*\*Application version:\*\* — \(not read: version element not found\)/);
+  assert.match(report.build({ ...meta, lang: 'tr', appVersion: '2.3.1' }, events, null).markdown, /\nSmoke, test ortamı \(2026-11-03, 1\/1; uygulama 2\.3\.1; guided-smoke v-1\)\n/);
+  assert.doesNotMatch(report.build(meta, events, null).markdown, /Application version|; app /);
+});
+
+test('doctor --base refuses an address that is no URL', () => {
+  const r = cli('doctor', '--base', 'test01');
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /--base "test01" is not a URL/);
 });
 
 test('only loopback addresses count as local', () => {

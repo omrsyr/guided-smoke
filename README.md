@@ -75,6 +75,10 @@ Start a new Claude Code session. The first run asks to install `playwright-core`
 folder — not into the skill folder. You can also do it yourself: `node <folder>/engine/run.js setup`, where the folder
 is `~/.claude/skills/guided-smoke` for the clone, or the `Read from` path that `claude plugin list` prints for the plugin.
 
+**Without the public npm registry** (a closed network): `setup` uses npm, so it follows your company's registry or
+proxy (`npm config set registry <internal registry>`, or `HTTPS_PROXY`). Or copy the `runtime` folder of the data
+folder from a machine with the same operating system where `setup` ran; `node <folder>/engine/run.js paths` names it.
+
 ## Try it
 
 ```bash
@@ -101,7 +105,7 @@ Say "run a smoke for this" or type:
 /guided-smoke list
 ```
 
-Useful flags: `--browser chrome|edge`, `--base https://localhost:5001`, `--pace slow|normal|fast`, `--from 5`,
+Useful flags: `--browser chrome|edge`, `--base https://localhost:5001`, `--env test`, `--pace slow|normal|fast`, `--from 5`,
 `--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (default: your system's), `--skip-writes`, `--fresh`,
 `--auto` (a step whose check passed goes on by itself after 3 s), `--panel left,min` (corner, start minimized),
 `--video`, `--trace` (recordings in the walk folder; the value box is left out of the trace; `--video` needs
@@ -111,7 +115,12 @@ See [SKILL.md](SKILL.md).
 
 ## Sign-in and data
 
-- **You sign in.** The script never sees a password; the browser's password saving is off in the smoke profile.
+- **You sign in.** The script never sees a password; the browser's password saving is off in the smoke profile. A
+  site with Windows sign-in gets your Windows account from the browser (`signIn: 'windows'` allows it for that host
+  only). A plan with a test database asks for its account in a tab of its own before the sign-in; the engine keeps it
+  in memory for the walk, hands it to `sqlcmd` through its environment, and never writes it down.
+- Changes a step makes outside the page (a database row, a job) happen only after you allow them, and a step with an
+  `undo` puts its change back when the walk ends, also after ■ Stop. The report says what was put back and what not.
 - The smoke uses its **own browser profile** per project and browser, so your everyday browser is untouched and you
   sign in once. `--fresh` uses a throw-away profile; "Sign out and clear the profile" on the closing screen deletes it.
 - Plans, walks, reports and profiles live outside your repository:
@@ -162,6 +171,32 @@ not copied, so it stays the one copy to edit, and `run 6655` finds it the next t
 files keep working. The plan's id is its `id`, else the file name without `.steps.js`. Walks and reports stay in the
 data folder of the machine that walked them. A plan is code that runs with your rights: walk only plans you have read
 (see [safety](references/safety.md)).
+
+## On a shared test server
+
+The same plan walks on your machine and on a test server, with that server's address, test records, database and
+sign-in in an environment of its own:
+
+```js
+envs: {
+  test: {
+    base: 'https://test01.corp.example/Orders',   // an IIS application path is kept
+    data: { order: 2001 },                         // the steps read ctx.data.order
+    signIn: 'windows',                             // IIS Windows authentication
+    db: { server: 'sqltest01', database: 'OrdersTest', login: 'sql' },   // sql() in steps and undos
+  },
+},
+appVersion: async ({ page, text }) => text(page.locator('#app-version')),
+```
+
+```bash
+node ~/guided-smoke/engine/run.js doctor --base https://test01.corp.example/Orders   # what the browser meets there
+node ~/guided-smoke/engine/run.js run smoke/6655-machine-expiry.steps.js --env test
+```
+
+The report names the environment and the build, and compares a walk only with earlier walks on the same server.
+Permitted steps stay off on a remote address unless `--allow-remote-writes` is given; give each an `undo`. See
+[writing steps](references/writing-steps.md) rules 19–21.
 
 ## Development
 

@@ -19,6 +19,8 @@ const STOPPED = 'The walk was stopped.';
 const AUTO_SECONDS = 3;
 // How long a plan's undo may take before it counts as failed: the walk must still end.
 const UNDO_TIMEOUT_MS = 60 * 1000;
+// The longest application version a walk keeps: a build number, not a page.
+const APP_VERSION_MAX = 40;
 
 const COLORS = { pass: '#198754', diff: '#dc3545', stop: '#6c757d', yes: '#198754', skip: '#fd7e14', info: '#0d6efd', warn: '#fd7e14' };
 
@@ -595,6 +597,21 @@ function appUrl(base, p, pathOnly = false) {
   return pathOnly ? u.pathname + u.search + u.hash : u.toString();
 }
 
+/**
+ * What to say when the start page could not be opened because of a Windows sign-in (net::ERR_INVALID_AUTH_CREDENTIALS):
+ * Chrome and Edge send the Windows account by themselves only to some addresses (localhost and a bare machine name,
+ * not a full name such as test01.corp.example), and without it the page fails at once, with no dialog. null for any
+ * other error.
+ */
+function signInError(message, { signIn, base, env }) {
+  if (!/ERR_INVALID_AUTH_CREDENTIALS/.test(String(message))) return null;
+  const host = (() => { try { return new URL(base).hostname; } catch { return base; } })();
+  if (signIn === 'windows') {
+    return `The Windows sign-in to ${host} failed although the browser was allowed to send it: the server does not accept this machine's account (Kerberos and its SPN, NTLM switched off) or the account has no access there. node run.js doctor --base ${base} shows what the browser meets.`;
+  }
+  return `${host} asks for a Windows sign-in, which the browser sends by itself only to addresses it is told to trust. Add signIn: 'windows' to ${env ? `envs.${env}` : 'the plan'} and walk again.`;
+}
+
 function isLocal(base) {
   try {
     const host = new URL(base).hostname.replace(/^\[|\]$/g, '');
@@ -656,7 +673,7 @@ function firstLine(error) {
  * @param {object} o.options    { browser, base, pace, allowed:Set|null, filterNote, skipWrites, allowRemoteWrites, workItem,
  *                                fresh, screens:'diff'|'all'|null, locale, lang, keepDownloads, auto, trace, video,
  *                                panel: { side:'left'|'right', min }, network: compileConfig(plan.network)|null, probe,
- *                                env: name|null, start, data, db } — env, start, data and db from envs.pickEnv
+ *                                env: name|null, start, data, db, signIn } — from envs.pickEnv
  *                                (default: the plan's own)
  */
 async function walk(o) {
@@ -666,6 +683,7 @@ async function walk(o) {
   const total = steps.length;
   const base = options.base;
   const remote = !isLocal(base);
+  const signIn = options.signIn || plan.signIn || null;
   const eventsFile = path.join(walkDir, 'events.jsonl');
   const metaFile = path.join(walkDir, 'walk.json');
   const screensDir = path.join(walkDir, 'screens');
@@ -682,7 +700,7 @@ async function walk(o) {
 
   const meta = {
     walkId, planId, project, title: plan.title || planId, workItem: options.workItem || plan.workItem || null,
-    env: options.env || null, base, remote, browser: options.browser.name, browserSource: options.browser.source, lang: options.lang,
+    env: options.env || null, base, remote, signIn, browser: options.browser.name, browserSource: options.browser.source, lang: options.lang,
     locale: options.locale || null, pace: options.pace, fresh: !!options.fresh, screens: options.screens || null,
     filter: options.filterNote || null, skipWrites: !!options.skipWrites, allowRemoteWrites: !!options.allowRemoteWrites,
     auto: !!options.auto, trace: !!options.trace, video: !!options.video, probe: !!options.probe, traces: [], videos: [],
@@ -735,7 +753,10 @@ async function walk(o) {
     viewport: null,
     // `locale` alone changes the page's language; the browser's own texts (validation balloons, date input format)
     // follow its UI language, which only --lang sets.
-    args: ['--start-maximized', ...(options.locale ? [`--lang=${options.locale}`] : [])],
+    // signIn: 'windows': the browser may send this machine's Windows account to the application's host, also under a
+    // full name (test01.corp.example), which it otherwise refuses at once.
+    args: ['--start-maximized', ...(options.locale ? [`--lang=${options.locale}`] : []),
+      ...(signIn === 'windows' ? [`--auth-server-allowlist=${new URL(base).hostname}`] : [])],
     acceptDownloads: true,
     ...(options.locale ? { locale: options.locale } : {}),
     ...(options.video ? { recordVideo: { dir: videoDir, size: { width: 1280, height: 720 } } } : {}),
@@ -1349,7 +1370,14 @@ async function walk(o) {
     watching = true;
     seen.clear();
     if (net) net.clear();
-    if (!dbStop) await ctx.goto(start);
+    if (!dbStop) {
+      try {
+        await ctx.goto(start);
+      } catch (e) {
+        const hint = signInError(e && e.message, { signIn, base, env: options.env });
+        throw hint ? new Error(hint) : e;
+      }
+    }
     while (!dbStop && !closed && !(await isReady().catch(() => false))) {
       if (Date.now() > deadline) throw new Error('Sign-in was not completed within 15 minutes.');
       await draw({ header: format(t.step, { n: 0, total }), accent: COLORS.warn, t, didLabel: t.did, expectLabel: t.todo,
@@ -1375,6 +1403,19 @@ async function walk(o) {
     meta.readyAt = new Date().toISOString();
     saveMeta();
     await traceResume();
+
+    // The application's version, read once by the plan: the report and the paste block carry it, so a walk on a test
+    // server says which build it walked. A plan that opens another page for it gets the start page back.
+    if (typeof plan.appVersion === 'function') {
+      const at = page.url();
+      try {
+        meta.appVersion = squash(String((await plan.appVersion(ctx)) ?? '')).slice(0, APP_VERSION_MAX) || null;
+      } catch (e) {
+        meta.appVersionError = firstLine(e).slice(0, 120);
+      }
+      if (!closed && page.url() !== at) await ctx.goto(start).catch(() => {});
+      saveMeta();
+    }
 
     // ---- steps ----
     let skipUntil = 0;
@@ -1533,4 +1574,4 @@ async function walk(o) {
   }
 }
 
-module.exports = { walk, appUrl, isLocal, normalizeCheck, expectLabel, drawPanel, drawBox, drawDbForm, emptyFields, seenIndices, redact, poll, isFunctionExpression, widen, PACE };
+module.exports = { walk, appUrl, isLocal, signInError, DEFAULT_LOGIN, normalizeCheck, expectLabel, drawPanel, drawBox, drawDbForm, emptyFields, seenIndices, redact, poll, isFunctionExpression, widen, PACE };

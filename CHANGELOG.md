@@ -35,6 +35,22 @@
     missing, a timeout, a query). The query and the output go through files that are removed at once, so Turkish
     letters come back as written (on the console, sqlcmd's first run in a process turns them into plain ones).
   - `doctor` names sqlcmd's version. `GUIDED_SMOKE_SQLCMD` points to another sqlcmd.
+- **Windows sign-in: `signIn: 'windows'`.** Chrome and Edge send the Windows account by themselves to `localhost` and
+  a bare machine name, but not to a full name (`test01.corp.example`): there an IIS site with Windows authentication
+  failed at once, with no dialog, and the walk waited for a sign-in that could not come. With `signIn: 'windows'` in
+  the plan or an environment the browser may send the account to the host of `base`, and only there.
+  - Without it, a walk that meets such a site stops at once and says to add `signIn: 'windows'` to the environment;
+    with it, a site that still refuses the account stops the walk with where to look (Kerberos, NTLM, access).
+- **`doctor --base <url>`: what the browser meets at an address**, before a walk on a test server. A headless browser
+  with a throw-away profile opens it once and says whether and how fast it answers (with a hint for a name that does
+  not resolve, a closed port or no answer), the certificate (one this machine does not trust is fine for a walk),
+  a Windows sign-in (and whether `signIn: 'windows'` makes it work), a redirect to a sign-in page, and the server's
+  name. An address that gives no answer ends `doctor` with exit code 1.
+- **`appVersion`: the build walked.** The plan's `appVersion(ctx)` runs once after the sign-in; the report's header
+  and the paste block's first line carry its text, cut to 40 characters. A plan that opens another page for it gets
+  the start page back before step 1; a failure is recorded as "not read" and the walk goes on.
+- The workflow's preflight for a shared test server: `doctor --base`, the build, a read-only schema check as step 1,
+  and an `undo` for each permitted step. The README says how to install without the public npm registry.
 
 ## 1.4.2 — 2026-11-16
 

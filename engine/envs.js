@@ -5,7 +5,7 @@
 
 const { checkDb } = require('./db');
 
-const ENV_KEYS = ['base', 'start', 'data', 'db'];
+const ENV_KEYS = ['base', 'start', 'data', 'db', 'signIn'];
 const ENV_NAME = /^[A-Za-z0-9][\w-]*$/;
 
 const isPlain = v => !!v && typeof v === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(v));
@@ -16,6 +16,7 @@ function checkOne(e, where) {
   }
   if (e.start != null && typeof e.start !== 'string') return `${where}: start must be a path, such as '/orders'.`;
   if (e.data != null && !isPlain(e.data)) return `${where}: data must be an object, such as { order: 1001 }.`;
+  if (e.signIn != null && e.signIn !== 'windows') return `${where}: signIn takes 'windows' (the browser signs in with this machine's Windows account), or is left out.`;
   return checkDb(e.db, where);
 }
 
@@ -40,12 +41,12 @@ function checkEnvs(plan) {
 }
 
 /**
- * The environment a walk runs in: { name, base, start, data, db }, name null for the plan's own. What an environment
- * leaves out comes from the plan; its data is laid over the plan's, key by key, its db replaces the plan's. An unknown
- * name throws, naming the known ones.
+ * The environment a walk runs in: { name, base, start, data, db, signIn }, name null for the plan's own. What an
+ * environment leaves out comes from the plan; its data is laid over the plan's, key by key, its db replaces the plan's.
+ * An unknown name throws, naming the known ones.
  */
 function pickEnv(plan, name) {
-  const own = { base: plan.base || null, start: plan.start || '/', data: { ...(plan.data || {}) }, db: plan.db || null };
+  const own = { base: plan.base || null, start: plan.start || '/', data: { ...(plan.data || {}) }, db: plan.db || null, signIn: plan.signIn || null };
   if (name == null) return { name: null, ...own };
   const envs = plan.envs || {};
   if (!Object.prototype.hasOwnProperty.call(envs, name)) {
@@ -55,7 +56,7 @@ function pickEnv(plan, name) {
       : `The plan has no environments, so --env ${name} has nothing to pick. Add envs: { ${/^\w+$/.test(name) ? name : 'test'}: { base: 'https://…' } } to the plan.`);
   }
   const e = envs[name];
-  return { name, base: e.base || own.base, start: e.start || own.start, data: { ...own.data, ...(e.data || {}) }, db: e.db || own.db };
+  return { name, base: e.base || own.base, start: e.start || own.start, data: { ...own.data, ...(e.data || {}) }, db: e.db || own.db, signIn: e.signIn || own.signIn };
 }
 
 module.exports = { checkEnvs, pickEnv, ENV_KEYS };

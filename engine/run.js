@@ -3,7 +3,7 @@
 // guided-smoke engine CLI. Claude calls this; the canonical user-facing forms are described in SKILL.md.
 //
 //   node run.js setup [--video]                        install playwright-core into the data folder (once); --video adds ffmpeg
-//   node run.js doctor                                 data folder, project, browser, runtime
+//   node run.js doctor [--base <url>]                  data folder, project, browser, runtime; --base: what the browser meets there
 //   node run.js init <plan-id> [--title T] [--work-item N] [--force]
 //   node run.js run <plan|walk|work-item|file.js> [--env <name>] [flags] [--force]
 //   node run.js demo [flags]                           walk the demo plan against the built-in demo application
@@ -36,7 +36,7 @@ const EARLIER_WALKS = 20;
 const FLAGS = {
   common: { project: 'value', json: 'bool', help: 'bool' },
   setup: { video: 'bool' },
-  doctor: { browser: 'value' },
+  doctor: { browser: 'value', base: 'value' },
   paths: {},
   init: { title: 'value', 'work-item': 'value', force: 'bool' },
   run: {
@@ -170,6 +170,7 @@ function loadPlan(file) {
   try { compileIgnore(plan.ignoreErrors); compileConfig(plan.network); } catch (e) { throw new UsageError(`${file}: ${e.message}`); }
   const envError = checkEnvs(plan);
   if (envError) throw new UsageError(`${file}: ${envError}`);
+  if (plan.appVersion !== undefined && typeof plan.appVersion !== 'function') throw new UsageError(`${file}: appVersion must be a function, such as async ({ page }) => page.locator('#version').textContent().`);
   return plan;
 }
 
@@ -273,8 +274,21 @@ async function main() {
       // Only a plan with a test database needs it (db: { server, database }).
       sqlcmd: (await require('./db').version()) || 'missing (needed only for a plan with db)',
     };
-    out(flags, data, Object.entries(data).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n'));
-    return runtime === 'missing' ? EXIT.runtime : EXIT.ok;
+    // --base: the address opened once in a headless browser, as a walk's browser would meet it.
+    if (flags.base) {
+      try { new URL(flags.base); } catch { throw new UsageError(`--base "${flags.base}" is not a URL.`); }
+      if (runtime === 'missing' || !chosen) {
+        throw Object.assign(new Error(`doctor --base needs ${runtime === 'missing' ? 'playwright-core (node run.js setup)' : 'Chrome or Edge'}.`), { exit: EXIT.runtime });
+      }
+      const { checkSite } = require('./site');
+      data.site = { address: flags.base, ...(await checkSite({ playwright: loadPlaywright(), browser: chosen, base: flags.base })) };
+    }
+    const line = ([k, v]) => `${k}: ${v && typeof v === 'object' ? JSON.stringify(v) : v}`;
+    const { site, ...rest } = data;
+    const siteText = site ? ['site:', ...Object.entries(site).filter(([k, v]) => k !== 'ok' && v != null).map(e => `  ${line(e)}`)] : [];
+    out(flags, data, [...Object.entries(rest).map(line), ...siteText].join('\n'));
+    if (runtime === 'missing') return EXIT.runtime;
+    return site && !site.ok ? EXIT.error : EXIT.ok;
   }
 
   if (command === 'init') {
@@ -454,7 +468,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
         lang: pickLanguage(flags.lang || plan.lang), keepDownloads: !!flags['keep-downloads'],
         auto: !!flags.auto, trace: !!flags.trace, video: !!flags.video, panel,
         network: flags.network ? compileConfig(plan.network) : null, probe: !!flags.probe,
-        env: env.name, start: env.start, data: env.data, db: env.db,
+        env: env.name, start: env.start, data: env.data, db: env.db, signIn: env.signIn,
       },
     });
   } catch (e) {

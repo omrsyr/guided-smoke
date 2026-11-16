@@ -24,6 +24,7 @@ const { walk } = require('../engine');
  * @param {Array} [o.db]         answers for the engine's database tab, in order: { user, password } (Connect; without
  *                               them, Try again), 'skip' or 'stop'
  * @param {string[]} [o.dbErrors] receives the tab's error line as it was before each answer
+ * @param {string[][]} [o.launched] receives the browser's command-line switches the walk asked for
  * @param {object} [o.options]   more walk options (auto, trace, video, panel)
  * @param {string} [o.profile]   a kept profile folder, as in a real walk (default: a throw-away one)
  */
@@ -31,7 +32,7 @@ async function autoWalk(o) {
   let context = null;
   const playwright = {
     chromium: {
-      launchPersistentContext: async (dir, options) => (context = await o.playwright.chromium.launchPersistentContext(dir, {
+      launchPersistentContext: async (dir, options) => (o.launched && o.launched.push(options.args), context = await o.playwright.chromium.launchPersistentContext(dir, {
         ...options, headless: true, viewport: o.viewport || { width: 1280, height: 800 },
         args: options.args.filter(a => a !== '--start-maximized'),
       })),

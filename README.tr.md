@@ -75,6 +75,11 @@ Yeni bir Claude Code session'ı aç. İlk koşu `playwright-core`'u (birkaç MB,
 ister; skill klasörüne değil. İstersen kendin de kurabilirsin: `node <klasör>/engine/run.js setup`; klasör, klonda
 `~/.claude/skills/guided-smoke`, plugin'de `claude plugin list` çıktısındaki `Read from` yoludur.
 
+**Herkese açık npm kayıt defterine erişim yoksa** (kapalı ağ): `setup` npm kullanır, yani şirketinin kayıt defterini
+ya da proxy'sini izler (`npm config set registry <iç kayıt defteri>` ya da `HTTPS_PROXY`). Ya da veri klasöründeki
+`runtime` klasörünü, aynı işletim sisteminde `setup`'ın koştuğu bir makineden kopyala; yerini
+`node <klasör>/engine/run.js paths` söyler.
+
 ## Dene
 
 ```bash
@@ -100,7 +105,7 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
 /guided-smoke list
 ```
 
-İşe yarayan bayraklar: `--browser chrome|edge`, `--base https://localhost:5001`, `--pace slow|normal|fast`, `--from 5`,
+İşe yarayan bayraklar: `--browser chrome|edge`, `--base https://localhost:5001`, `--env test`, `--pace slow|normal|fast`, `--from 5`,
 `--only 3,7-9`, `--screens diff|all`, `--locale tr-TR` (varsayılan: sistemin dili), `--skip-writes`, `--fresh`,
 `--auto` (kontrolü geçen adım 3 sn sonra kendiliğinden geçer), `--panel left,min` (köşe, küçültülmüş başla),
 `--video`, `--trace` (kayıtlar koşu klasöründe; değer kutusu izin dışında kalır; `--video` için bir kez
@@ -110,7 +115,13 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
 
 ## Giriş ve veriler
 
-- **Girişi sen yaparsın.** Betik parolayı hiç görmez; smoke profilinde tarayıcının parola kaydı kapalıdır.
+- **Girişi sen yaparsın.** Betik parolayı hiç görmez; smoke profilinde tarayıcının parola kaydı kapalıdır. Windows
+  girişli bir site Windows hesabını tarayıcıdan alır (`signIn: 'windows'` buna yalnız o adres için izin verir). Test
+  veritabanı olan bir plan, hesabını girişten önce kendi sekmesinde sorar; motor onu koşu boyunca bellekte tutar,
+  `sqlcmd`'ye ortam değişkeniyle verir ve hiçbir yere yazmaz.
+- Bir adımın sayfa dışında yaptığı değişiklikler (bir veritabanı satırı, bir iş) yalnız sen izin verince olur; `undo`
+  taşıyan adım değişikliğini koşu bitince, ■ Durdur'dan sonra da geri alır. Rapor neyin geri alındığını, neyin
+  alınmadığını söyler.
 - Smoke proje ve tarayıcı başına **kendi tarayıcı profilini** kullanır: günlük tarayıcın etkilenmez, girişi bir kez
   yaparsın. `--fresh` geçici profil kullanır; son ekrandaki "Çıkış yap ve profili temizle" profili siler.
 - Planlar, koşular, raporlar ve profiller reponun dışında durur:
@@ -147,6 +158,32 @@ tek kopya o kalır, bir sonraki seferde `run 6655` onu bulur. Proje dosyalarına
 eder. Planın kimliği `id` alanıdır, yoksa `.steps.js` olmadan dosya adı. Koşular ve raporlar, koşan makinenin veri
 klasöründe kalır. Plan senin yetkilerinle çalışan koddur: yalnız okuduğun planları koş
 (bkz. [güvenlik](references/safety.md)).
+
+## Ortak test sunucusunda
+
+Aynı plan hem senin makinende hem bir test sunucusunda koşar; sunucunun adresi, test kayıtları, veritabanı ve giriş
+türü ayrı bir ortamda durur:
+
+```js
+envs: {
+  test: {
+    base: 'https://test01.corp.example/Orders',   // IIS uygulama yolu korunur
+    data: { order: 2001 },                         // adımlar ctx.data.order okur
+    signIn: 'windows',                             // IIS Windows kimlik doğrulaması
+    db: { server: 'sqltest01', database: 'OrdersTest', login: 'sql' },   // adımlarda ve geri almada sql()
+  },
+},
+appVersion: async ({ page, text }) => text(page.locator('#app-version')),
+```
+
+```bash
+node ~/guided-smoke/engine/run.js doctor --base https://test01.corp.example/Orders   # tarayıcı orada ne buluyor
+node ~/guided-smoke/engine/run.js run smoke/6655-machine-expiry.steps.js --env test
+```
+
+Rapor ortamı ve sürümü yazar, bir koşuyu yalnız aynı sunucudaki önceki koşularla karşılaştırır. İzinli adımlar uzak
+adreste `--allow-remote-writes` verilmedikçe kapalı kalır; her birine bir `undo` ver. Bkz.
+[adım yazmak](references/writing-steps.md) kural 19–21.
 
 ## Geliştirme
 

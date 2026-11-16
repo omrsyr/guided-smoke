@@ -13,7 +13,8 @@ const LABELS = {
     measuredNote: 'sign-in wait excluded; your own extra checking is not included', browser: 'Browser', base: 'Address',
     result: 'Result', filter: 'Filter', summary: 'Summary', steps: 'Steps', step: 'Step', outcome: 'Result', auto: 'Automatic check',
     note: 'Note', shot: 'Screenshot', compare: 'Compared with', noChange: 'No change in results.', newStep: 'new step', wasStep: 'was step {n}', removedStep: 'no longer in the plan (was step {n})', paste: 'To paste into the work item',
-    pasteTitle: 'Smoke ({date}, {pass}/{run}; guided-smoke {walk})', pasteTitleEnv: 'Smoke on {env} ({date}, {pass}/{run}; guided-smoke {walk})',
+    pasteTitle: 'Smoke ({date}, {pass}/{run}{app}; guided-smoke {walk})', pasteTitleEnv: 'Smoke on {env} ({date}, {pass}/{run}{app}; guided-smoke {walk})',
+    app: 'Application version', appShort: 'app {v}', appUnread: 'not read: {error}',
     env: 'Environment', notRun: 'not run', results: { completed: 'completed', stopped: 'stopped by the user', error: 'ended with an error', running: 'still running or interrupted' },
     against: '✔ given although the automatic check failed', againstSummary: '⚠ {count} passed although the automatic check failed: {steps}.',
     againstShort: 'automatic check failed',
@@ -54,7 +55,8 @@ const LABELS = {
     measuredNote: 'giriş beklemesi hariç; senin ek incelemen dahil değil', browser: 'Tarayıcı', base: 'Adres',
     result: 'Sonuç', filter: 'Filtre', summary: 'Özet', steps: 'Adımlar', step: 'Adım', outcome: 'Sonuç', auto: 'Otomatik kontrol',
     note: 'Not', shot: 'Görüntü', compare: 'Önceki koşuyla fark', noChange: 'Sonuçlarda değişiklik yok.', newStep: 'yeni adım', wasStep: '{n}. adımdı', removedStep: 'artık planda yok ({n}. adımdı)', paste: 'İş kaydına yapıştırmak için',
-    pasteTitle: 'Smoke ({date}, {pass}/{run}; guided-smoke {walk})', pasteTitleEnv: 'Smoke, {env} ortamı ({date}, {pass}/{run}; guided-smoke {walk})',
+    pasteTitle: 'Smoke ({date}, {pass}/{run}{app}; guided-smoke {walk})', pasteTitleEnv: 'Smoke, {env} ortamı ({date}, {pass}/{run}{app}; guided-smoke {walk})',
+    app: 'Uygulama sürümü', appShort: 'uygulama {v}', appUnread: 'okunamadı: {error}',
     env: 'Ortam', notRun: 'koşulmadı', results: { completed: 'tamamlandı', stopped: 'kullanıcı durdurdu', error: 'hatayla bitti', running: 'sürüyor ya da yarıda kesildi' },
     against: 'otomatik kontrol ✖ iken ✔ verildi', againstSummary: '⚠ {count} adım otomatik kontrol ✖ iken ✔ aldı: {steps}.',
     againstShort: 'otomatik kontrol ✖',
@@ -182,6 +184,7 @@ function build(meta, events, prev) {
   if (meta.env) lines.push(`- **${L.env}:** ${meta.env}`);
   lines.push(`- **${L.base}:** ${meta.base}`);
   if (meta.db) lines.push(`- **${L.db}:** ${L.dbModes[meta.db] || meta.db}`);
+  if (meta.appVersion || meta.appVersionError) lines.push(`- **${L.app}:** ${meta.appVersion || `— (${L.appUnread.replace('{error}', () => meta.appVersionError)})`}`);
   lines.push(`- **${L.result}:** ${L.results[meta.result] || meta.result}${meta.error ? ` — ${meta.error}` : ''}`);
   if (meta.filter) lines.push(`- **${L.filter}:** ${meta.filter}`);
   const recordings = [...(meta.traces || []), ...(meta.videos || [])];
@@ -258,7 +261,7 @@ function build(meta, events, prev) {
 
   const ran = c.pass + c.diff;
   lines.push('', `## ${L.paste}`, '', '```text');
-  lines.push((meta.env ? L.pasteTitleEnv.replace('{env}', meta.env) : L.pasteTitle).replace('{date}', start.day).replace('{pass}', c.pass).replace('{run}', ran).replace('{walk}', meta.walkId));
+  lines.push((meta.env ? L.pasteTitleEnv.replace('{env}', meta.env) : L.pasteTitle).replace('{date}', start.day).replace('{pass}', c.pass).replace('{run}', ran).replace('{walk}', meta.walkId).replace('{app}', () => (meta.appVersion ? `; ${L.appShort.replace('{v}', () => meta.appVersion)}` : '')));
   for (let n = 1; n <= meta.totalSteps; n++) {
     const e = states.get(n);
     if (!e || e.answer === 'stop') continue;
