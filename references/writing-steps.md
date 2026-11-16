@@ -108,7 +108,8 @@ For an API that needs the user's account, the project's database tool, or a back
     the strong findings. ⛔ critical: a secret field in a JSON answer (`password`, `passwordHash`, `token` outside a
     sign-in or token endpoint, `secret`, `apiKey`, a card number), a secret in an address (`?access_token=`), part of
     a connection string in an error answer. ⚠ warning: a call taking 3 × `slowMs` or more, the same call 3 or more
-    times in one step, a personal data field (`iban`, `tckn`, a national id: does this screen need it?), a stack
+    times in a row (sent by the page itself within 2 s of the previous one's end, with no click or typing in between:
+    a page polling on a timer or a step deleting rows one by one is not one), a personal data field (`iban`, `tckn`, a national id: does this screen need it?), a stack
     trace or database error in an error answer. The report lists every finding, also calls over `slowMs` and answers
     over 1 MB, and per site the missing security headers, headers that name the server, session cookies without
     HttpOnly or Secure, and text sent uncompressed. Headers and bodies are read only for the application's own

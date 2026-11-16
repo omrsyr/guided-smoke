@@ -383,6 +383,20 @@ function listenInvalid(field) {
   document.addEventListener('invalid', window.__guidedSmokeInvalidOn, true);
 }
 
+// Runs in every page and frame (--network): tells the engine when someone acted on the page — a click, a key press or
+// typing, by the plan or the user — so that the same call sent once per action is not taken for the page repeating
+// itself. Only the time travels; the engine's own panel and value box are left out.
+function listenInput() {
+  if (window.__guidedSmokeInputOn) return;
+  window.__guidedSmokeInputOn = true;
+  const ours = e => e.composedPath().some(n => n && typeof n.id === 'string' && n.id.startsWith('__guided_smoke'));
+  const acted = e => {
+    if (!e.isTrusted || ours(e) || typeof window.__guidedSmokeInput !== 'function') return;
+    window.__guidedSmokeInput(Date.now()).catch(() => {});
+  };
+  for (const type of ['pointerdown', 'keydown', 'input']) window.addEventListener(type, acted, true);
+}
+
 /**
  * Replaces every occurrence of the given values in the strings, keys and numbers of a value with "•••": as typed,
  * JSON-escaped, URL-encoded, form-encoded and base64, and every pair as base64 "a:b" (Basic authentication). Anything
@@ -719,6 +733,10 @@ async function walk(o) {
     if (pending) { const r = pending; pending = null; r({ a, note, by: by === 'auto' ? 'auto' : undefined }); }
   });
   await context.exposeFunction('__guidedSmokeMin', on => { panelMin = !!on; });
+  if (net) {
+    await context.exposeFunction('__guidedSmokeInput', at => net.input(at));
+    await context.addInitScript(listenInput);
+  }
   // The value box's button: the user has filled it in. Nothing travels with the call.
   let boxReady = null;
   await context.exposeFunction('__guidedSmokeBoxReady', () => {

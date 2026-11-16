@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **`--network` reads a repeated call as the page repeating itself, not as a timer or a new action.** Two field
+  walks showed the noise: a maintenance notice asking the server every 8 seconds was "the same call 7 times" while
+  the user read the panel, and a clean-up step deleting nine rows one by one was "DELETE 9 times". A call now
+  repeats only when the page sends it again by itself: before the previous one ended or within 2 seconds of that, and
+  with no click, key press or typing on the page in between. One record read per call (N+1) and the same call sent
+  from several places at once still count; a timer's calls and the same action done again do not.
+  - The finding reads "… 3 times in a row" (was "… in this step").
+
 ## 1.4.0 — 2026-11-10
 
 - **`--probe`: probing a form the way an experienced tester would.** A step marked `probe: true` sends one form field

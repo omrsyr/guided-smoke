@@ -19,7 +19,9 @@ const LARGE = 1024 * 1024;    // bytes on the wire
 const UNCOMPRESSED = 10 * 1024;
 const JSON_MAX = 1024 * 1024; // successful JSON bodies read for field names
 const ERROR_MAX = 256 * 1024; // error bodies read for details
-const REPEAT = 3;             // the same call this often in one step
+const REPEAT = 3;             // the same call this often in a row
+const REPEAT_GAP_MS = 2000;   // a call starting this long after the same call ended starts a new row
+const INPUTS = 200;           // the latest clicks and key presses kept, to tell a new action from a repeat
 const KEEP = 10;              // findings kept per step in events.jsonl
 const SHOW = 3;               // finding lines in the panel
 const NAMES = 5;              // field or parameter names kept per finding
@@ -264,8 +266,24 @@ class Network {
     try { this.host = new URL(base).hostname; } catch { this.host = null; }
     this.onChange = onChange || (() => {});
     this.sites = new Map();
+    this.inputs = [];
     this.gen = 0;
     this.clear();
+  }
+
+  /**
+   * Someone acted on the page at `at` (epoch milliseconds): a click, a key press or typing, by the plan or the user.
+   * The same call sent again after it is a new row, not the page repeating itself (a clean-up deleting rows one by one).
+   */
+  input(at) {
+    if (!Number.isFinite(at)) return;
+    this.inputs.push(at);
+    if (this.inputs.length > INPUTS) this.inputs.splice(0, this.inputs.length - INPUTS);
+  }
+
+  /** Whether someone acted on the page after `from` and up to `to` (epoch milliseconds). */
+  actedBetween(from, to) {
+    return this.inputs.some(at => at > from && at <= to);
   }
 
   /** Forgets the step so far (the sign-in, a record taken). Reads still running for it are dropped. */
@@ -313,7 +331,7 @@ class Network {
     r.response = typeof request.existingResponse === 'function' ? request.existingResponse() : null;
     r.status = r.response ? r.response.status() : 0;
     const timing = request.timing();
-    this.count(r, timing.responseEnd >= 0 ? timing.responseEnd : null);
+    this.count(r, timing.responseEnd >= 0 ? timing.responseEnd : null, timing.startTime);
     if (!r.masked) {
       const params = secretParams(r.raw);
       if (params.length) this.add({ kind: 'secret-param', level: 'critical', method: r.method, url: r.url, params: params.slice(0, NAMES) });
@@ -332,11 +350,12 @@ class Network {
     if (!r) return;
     const { startTime } = request.timing();
     r.reason = String(reason).slice(0, 80);
-    this.count(r, startTime > 0 ? Math.max(0, Date.now() - startTime) : null);
+    this.count(r, startTime > 0 ? Math.max(0, Date.now() - startTime) : null, startTime);
     this.onChange();
   }
 
-  count(r, ms) {
+  /** `ms`: how long the call took (null when unknown); `startTime`: when it was sent, in epoch milliseconds. */
+  count(r, ms, startTime) {
     const s = this.step;
     s.requests++;
     const url = r.masked ? MASK : r.url;
@@ -349,10 +368,19 @@ class Network {
     }
     if (!r.masked && r.own && CALLS.has(r.type)) {
       // The same call: method and path, query left out, plain numbers taken as ids (N+1 reads one record per call).
+      // It repeats when the page sends it again by itself, without a pause: before the previous one ended or within
+      // REPEAT_GAP_MS of that (one record read per call, the same call sent from three places at once). A page asking
+      // again on a timer leaves a pause between its calls; a click or key press in between (the plan deleting rows
+      // one by one, the user) is a new action, not a repeat.
       const path = r.url.replace(/\/\d+(?=\/|$)/g, `/${MASK}`);
-      const times = (this.calls.get(`${r.method} ${path}`) || 0) + 1;
-      this.calls.set(`${r.method} ${path}`, times);
-      if (times >= REPEAT) this.add({ kind: 'repeated', level: 'warn', method: r.method, url: path, times });
+      const key = `${r.method} ${path}`;
+      const start = startTime > 0 ? startTime : Date.now() - (ms || 0);
+      const end = start + (ms || 0);
+      const last = this.calls.get(key);
+      const same = last && start - last.end < REPEAT_GAP_MS && !this.actedBetween(last.start, start);
+      const row = same ? { times: last.times + 1, start: Math.max(last.start, start), end: Math.max(last.end, end) } : { times: 1, start, end };
+      this.calls.set(key, row);
+      if (row.times >= REPEAT) this.add({ kind: 'repeated', level: 'warn', method: r.method, url: path, times: row.times });
     }
   }
 
@@ -440,7 +468,7 @@ class Network {
     const key = `${f.kind} ${f.method} ${f.url}`;
     const old = this.found.get(key);
     if (!old) { this.found.set(key, f); return; }
-    if (f.kind === 'repeated') { old.times = f.times; return; }
+    if (f.kind === 'repeated') { old.times = Math.max(old.times, f.times); return; }
     old.times = (old.times || 1) + 1;
     for (const list of ['keys', 'params', 'what']) if (f[list]) old[list] = [...new Set([...old[list], ...f[list]])].slice(0, NAMES);
     if (f.ms > old.ms) old.ms = f.ms;

@@ -340,6 +340,19 @@ test('--network: a critical finding holds --auto and a warning does not; the val
         await get([`/api/fake/user?access_token=${secret.token}`, '/api/fake/connect/token'])(ctx);
       } },
       { title: 'Repeated', did: 'x', expect: ['x'], check: ok, run: get(['/api/settings', '/api/settings', '/api/settings']) },
+      // The plan clicks the same button three times, quickly: three actions, not the page repeating a call.
+      { title: 'Clicked again', did: 'x', expect: ['x'], check: ok, run: async ({ page }) => {
+        await page.evaluate(() => {
+          const b = document.createElement('button');
+          b.id = 'again';
+          b.textContent = 'Again';
+          b.onclick = () => fetch('/api/settings');
+          document.body.prepend(b);
+        });
+        for (let i = 0; i < 3; i++) {
+          await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/settings')), page.click('#again')]);
+        }
+      } },
       { title: 'Local error page', did: 'x', expect: ['x'], check: ok, run: get(['/api/fake/stack']) },
       { title: 'Connection string', did: 'x', expect: ['x'], check: ok, run: get(['/api/fake/conn']) },
       { title: 'Boxed', did: 'x', expect: ['x'], check: ok, run: async ({ secretBox, inPage }) => {
@@ -359,8 +372,8 @@ test('--network: a critical finding holds --auto and a warning does not; the val
     assert.strictEqual(meta.result, 'completed');
     const events = readEvents(walkDir);
     assert.deepStrictEqual(events.map(e => [e.title, e.answeredBy || 'user']),
-      [['Leaks', 'user'], ['Repeated', 'auto'], ['Local error page', 'auto'], ['Connection string', 'user'], ['Boxed', 'auto'], ['Ignored', 'auto']]);
-    const [leaks, repeated, local, conn, boxed, ignored] = events.map(e => e.network);
+      [['Leaks', 'user'], ['Repeated', 'auto'], ['Clicked again', 'auto'], ['Local error page', 'auto'], ['Connection string', 'user'], ['Boxed', 'auto'], ['Ignored', 'auto']]);
+    const [leaks, repeated, again, local, conn, boxed, ignored] = events.map(e => e.network);
     const find = (r, kind) => r.findings.find(x => x.kind === kind);
     assert.deepStrictEqual(find(leaks, 'secret-param').params, ['access_token']);
     assert.deepStrictEqual(find(leaks, 'secret-field').keys, ['$.sessions[].refreshToken']);
@@ -368,6 +381,7 @@ test('--network: a critical finding holds --auto and a warning does not; the val
     assert.ok(!leaks.findings.some(x => /connect\/token/.test(x.url)), 'a token endpoint hands tokens out');
     assert.match(shown.Leaks, /⛔ GET \/api\/fake\/user: secret in the address: access_token/);
     assert.deepStrictEqual([repeated.critical, repeated.warnings, find(repeated, 'repeated').times], [0, 1, 3]);
+    assert.ok(again.requests >= 3 && !(again.findings || []).some(x => x.kind === 'repeated'), JSON.stringify(again));
     assert.deepStrictEqual([local.critical, local.warnings, find(local, 'error-detail').env], [0, 0, true]);
     assert.doesNotMatch(shown['Local error page'], /stack trace/, 'what a local error page shows on purpose is not a panel line');
     assert.strictEqual(conn.critical, 1);

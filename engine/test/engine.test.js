@@ -282,7 +282,7 @@ test('the report shows browser errors in the summary, the note column, a section
 });
 
 // A request as Playwright hands it to the engine, for the network tests: an answer with headers and a body, or a failure.
-function fakeRequest({ method = 'GET', url, type = 'fetch', status = 200, ms = 40, headers = {}, cookies = [], body = '', bytes, failure }) {
+function fakeRequest({ method = 'GET', url, type = 'fetch', status = 200, ms = 40, start, headers = {}, cookies = [], body = '', bytes, failure }) {
   const h = { 'content-type': 'application/json; charset=utf-8', ...headers };
   const raw = Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
   const response = failure ? null : {
@@ -293,7 +293,7 @@ function fakeRequest({ method = 'GET', url, type = 'fetch', status = 200, ms = 4
   };
   return {
     method: () => method, url: () => url, resourceType: () => type,
-    timing: () => ({ startTime: Date.now() - ms, responseEnd: failure ? -1 : ms }),
+    timing: () => ({ startTime: start ?? Date.now() - ms, responseEnd: failure ? -1 : ms }),
     existingResponse: () => response,
     sizes: async () => ({ responseBodySize: bytes ?? raw.length }),
     failure: () => (failure ? { errorText: failure } : null),
@@ -458,7 +458,7 @@ test('the report shows network findings in the summary, the note column, a secti
   assert.match(markdown, /\| 1 \| a \| ✔ passed \|  \| 🌐 ⛔ 2 network findings \|/);
   assert.match(markdown, /## Network\n\n.*never a value or a body.*\n\n\| # \| Step \| Requests \| Size \| Slowest \| Findings \|/);
   assert.match(markdown, /\| 1 \| a \| 14 \| 1\.2 MB \| GET \/api\/customers 3\.4 s \| ⛔ secret field · ⚠ repeated ×3 \|\n\| 2 \| b \| 2 \| 900 B \| GET \/x 12 ms \|  \|/);
-  assert.match(markdown, /- 1\. a: `⛔ GET \/api\/customers\/•••: secret field in the response: \$\.items\[\]\.passwordHash` · `⚠ GET \/api\/tips 3 times in this step` · `⚠ GET \/api\/fail → 500: stack trace, database error in the error response \(expected in this environment\)`/);
+  assert.match(markdown, /- 1\. a: `⛔ GET \/api\/customers\/•••: secret field in the response: \$\.items\[\]\.passwordHash` · `⚠ GET \/api\/tips 3 times in a row` · `⚠ GET \/api\/fail → 500: stack trace, database error in the error response \(expected in this environment\)`/);
   assert.match(markdown, /4 requests matched the plan's network\.ignore/);
   assert.match(markdown, /### Site — http:\/\/localhost \(expected on this machine; check on the test or production server\)\n\n- Missing security headers: X-Frame-Options \(or CSP frame-ancestors\) \(3\/3 pages\)\n- Headers that name the server or its version: X-Powered-By\n- Session cookies without HttpOnly: sid\n- Text responses sent uncompressed: 2 \(largest GET \/app\.js, 240 KB\)/);
   assert.match(markdown, /\n✔ a \(🌐 ⛔ 2 network findings\)\n✔ b\n/);
@@ -840,6 +840,45 @@ test('each try of a probe counts "the same call" again: a call made once per try
   assert.ok(!(await net.take()).findings.some(f => f.kind === 'repeated'));
   for (let i = 0; i < 3; i++) net.finished(fakeRequest({ url: `${base}/api/config` }), false);
   assert.strictEqual((await net.take()).findings.find(f => f.kind === 'repeated').times, 3);
+});
+
+test('a call repeats only when it follows itself without a pause: a timer\'s calls and a person clicking again are not repeated calls', async () => {
+  const base = 'https://localhost:5001';
+  const net = new network.Network({ base, config: network.compileConfig(), local: true });
+  const t0 = Date.now() - 120000;
+  const repeated = async () => (await net.take()).findings.filter(f => f.kind === 'repeated').map(f => `${f.url} ×${f.times}`);
+  const call = (url, start, ms = 40) => net.finished(fakeRequest({ url: `${base}${url}`, start, ms }), false);
+
+  // A notice polled every 8 s (as a page with a timer does) for a minute, and an action done three times 5 s apart.
+  for (let i = 0; i < 8; i++) call('/api/status', t0 + i * 8000);
+  for (let i = 0; i < 3; i++) net.finished(fakeRequest({ method: 'POST', url: `${base}/api/orders/7/approve`, start: t0 + 1000 + i * 5000 }), false);
+  assert.deepStrictEqual(await repeated(), []);
+
+  // N+1 waited for one by one: each slow call starts as the previous one ends, the row is long in time.
+  for (let i = 0; i < 4; i++) call(`/api/customers/${i + 1}`, t0 + i * 1250, 1200);
+  // The same call from three places at once, answered in a different order than sent.
+  for (const i of [2, 0, 1]) call('/api/settings', t0 + 5000 + i * 5, 300);
+  // One click, then the page reads five pages of results one after another.
+  net.input(t0 + 8990);
+  for (let i = 0; i < 5; i++) call('/api/search', t0 + 9000 + i * 300);
+  assert.deepStrictEqual(await repeated(), ['/api/customers/••• ×4', '/api/settings ×3', '/api/search ×5']);
+
+  // A pause starts a new row; the finding keeps the longest one.
+  for (const s of [0, 100, 200, 300, 10000, 10100, 10200]) call('/api/tips', t0 + s);
+  assert.deepStrictEqual(await repeated(), ['/api/tips ×4']);
+  assert.strictEqual(network.findingLine({ kind: 'repeated', level: 'warn', method: 'GET', url: '/api/tips', times: 4 }, texts('tr')), '⚠ GET /api/tips art arda 4 kez');
+
+  // A clean-up deleting rows one by one: a click before every call, each call a new action, however quick.
+  for (let i = 0; i < 9; i++) {
+    net.input(t0 + 20000 + i * 400);
+    net.finished(fakeRequest({ method: 'DELETE', url: `${base}/api/models/${i + 1}`, start: t0 + 20000 + i * 400 + 150, ms: 90 }), false);
+  }
+  // Answered out of order after one click: still the page repeating itself.
+  net.input(t0 + 30000);
+  for (const i of [2, 0, 1]) call('/api/badges', t0 + 30010 + i * 5, 200);
+  assert.deepStrictEqual(await repeated(), ['/api/badges ×3']);
+  net.input(NaN);
+  assert.ok(net.inputs.every(Number.isFinite), 'a time that is no number is not kept');
 });
 
 test.after(() => fs.rmSync(home, { recursive: true, force: true }));
