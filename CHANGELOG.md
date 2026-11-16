@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.1 — 2026-11-16
 
 - **`--network` reads a repeated call as the page repeating itself, not as a timer or a new action.** Two field
   walks showed the noise: a maintenance notice asking the server every 8 seconds was "the same call 7 times" while
