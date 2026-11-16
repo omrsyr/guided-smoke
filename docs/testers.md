@@ -84,6 +84,8 @@ Every plan of the folder is walked, one after another, in the order of their nam
 - All plans are checked before a browser opens. If one cannot be walked, nothing starts and each problem is named:
   that is for the plan's author to fix.
 - Each plan opens its own browser window, and the panel's header says where you are: "Plan 2/5 · Smoke 3 / 9".
+  The windows share the smoke profile, so you sign in for the first plan and the next ones find you signed in (an
+  application whose sign-in lasts only as long as a window is open asks again).
 - Between two plans a screen names the next one: **▶ Next plan** goes on, **■ Stop the suite** ends there.
 - **■ Stop** in a step, or closing the window, ends the whole suite; the plans not reached are reported as "not
   walked". A plan that breaks (its page does not answer) ends alone, and the next plan is walked.

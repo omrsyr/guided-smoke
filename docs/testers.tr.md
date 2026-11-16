@@ -83,6 +83,8 @@ Klasördeki her plan, adlarının sırasıyla (`01-…`, `02-…`) art arda koş
 - Bütün planlar tarayıcı açılmadan denetlenir. Biri koşulamıyorsa hiçbir şey başlamaz ve her sorun adıyla yazılır:
   düzeltmek planın yazarının işidir.
 - Her plan kendi tarayıcı penceresini açar; panelin başlığı nerede olduğunu söyler: "Plan 2/5 · Smoke 3 / 9".
+  Pencereler smoke profilini paylaşır: girişi ilk plan için yaparsın, sonraki planlar seni girişli bulur (girişi yalnız
+  pencere açıkken süren bir uygulama yeniden sorar).
 - İki plan arasında bir ekran sıradakinin adını verir: **▶ Sonraki plan** devam eder, **■ Suite'i durdur** orada
   bitirir.
 - Bir adımdaki **■ Durdur** ya da pencereyi kapatmak bütün suite'i bitirir; ulaşılmayan planlar raporda "koşulmadı"
