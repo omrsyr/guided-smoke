@@ -21,6 +21,20 @@
     report's "Undo" section lists every one: put back (and when), failed (and why), or pending when the process ended
     first; the summary warns about each change not put back and the paste block counts them.
   - The demo puts back its overdue date and the reminder its job wrote.
+- **The test database: `db` and `sql()`.** A plan or environment with `db: { server, database, login }` (SQL Server,
+  through `sqlcmd`) gets `sql(query)` in its steps and undos: `{ rows, affected, value }`.
+  - With `login: 'sql'` the engine opens a tab of its own before the sign-in (`about:blank`: no page of the
+    application can reach it). It shows the server and the database; the user types an account, which is tried at
+    once and asked again when refused, with the reason. With `login: 'windows'` the Windows account is used, and the
+    tab opens only when it fails.
+  - The account stays in the engine's memory for the walk and reaches sqlcmd as `SQLCMDUSER` / `SQLCMDPASSWORD` in its
+    environment only; never an argument, a file, a record or a trace. With `--video` that tab's recording is deleted.
+  - **Continue without the database** skips the steps marked `db: true` ("no database"); `sql()` elsewhere then says
+    the walk has none. The report says whether the walk had its database.
+  - sqlcmd's messages are never shown: a failure says only its kind (the account, the database, the network, sqlcmd
+    missing, a timeout, a query). The query and the output go through files that are removed at once, so Turkish
+    letters come back as written (on the console, sqlcmd's first run in a process turns them into plain ones).
+  - `doctor` names sqlcmd's version. `GUIDED_SMOKE_SQLCMD` points to another sqlcmd.
 
 ## 1.4.2 — 2026-11-16
 

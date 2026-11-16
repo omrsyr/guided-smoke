@@ -57,8 +57,38 @@ the account into a box on the page and the call runs inside the page. The script
 
 ## Reading and writing the database
 
-Use the project's own tool: a script in the repository, or the database CLI the project documents. Pass fixed query
-text with ids from the plan or `state`, and never pass the tool's output on.
+On SQL Server, give the plan (or the environment) a `db` and use `sql()` ([writing steps](writing-steps.md) rule 20):
+the user types the account into the engine's own tab, and the walk works the same on this machine and on a shared
+test server.
+
+```js
+{
+  title: 'Overdue order (due date moved into the past)',
+  db: true,
+  approve: { what: 'In the test database set order 2001\'s due date to yesterday: one UPDATE limited to that order.' },
+  undo: {
+    what: 'Order 2001\'s due date goes back to what it was.',
+    run: async ({ sql, state, data }) => {
+      if (!('due' in state)) return;    // the step did not get as far as reading it
+      await sql(`UPDATE dbo.Orders SET DueDate = ${state.due === 'NULL' ? 'NULL' : `'${state.due}'`} WHERE Id = ${Number(data.order)}`);
+    },
+  },
+  did: '…', expect: ['…'],
+  run: async ({ sql, state, data, page }) => {
+    state.due = (await sql(`SELECT CONVERT(char(10), DueDate, 23) FROM dbo.Orders WHERE Id = ${Number(data.order)}`)).value;
+    state.rows = (await sql(`UPDATE dbo.Orders SET DueDate = DATEADD(day, -1, CAST(GETDATE() AS date)) WHERE Id = ${Number(data.order)}`)).affected;
+    await page.reload();
+  },
+  check: async ({ state }) => [state.rows === 1, '1 row updated.', `${state.rows} rows updated (expected 1).`],
+},
+```
+
+- Read the old value into `state` before changing it, and let the undo do nothing without it.
+- Ids come from `data` and go through `Number()` (or a fixed text): query text is never built from what a page shows.
+
+Another database, or a project that already has its own tool (a script in the repository, the database CLI the
+project documents): call it from the plan. Pass fixed query text with ids from the plan or `state`, and never pass the
+tool's output on.
 
 ```js
 const { execFileSync } = require('child_process');
@@ -78,7 +108,8 @@ const rowsAffected = out => Number((out.match(/^\s*(\d+)\s*$/m) || [])[1]);
   count with the expected one.
 - Read-only counts are plain steps. Select only what the check needs (counts, outcomes), not addresses, keys or
   personal data. Never put raw output into `did`, `expect`, a check text or `log`.
-- Connection strings stay in the tool's configuration: the plan neither reads nor prints them.
+- Connection strings stay in the tool's configuration: the plan neither reads nor prints them. With `db` there is
+  none: the server and database names are in the plan, the account only in the engine's memory.
 - To count only what the walk itself caused, read the database's own clock into `state` before the first action
   and filter by it. The script's clock and time zone may differ from the server's.
 

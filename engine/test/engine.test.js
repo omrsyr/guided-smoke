@@ -16,6 +16,7 @@ const network = require('../network');
 const probing = require('../probe');
 const { texts } = require('../i18n');
 const { checkEnvs, pickEnv } = require('../envs');
+const sqlDb = require('../db');
 const { appUrl, isLocal, normalizeCheck, expectLabel, redact, poll, isFunctionExpression } = require('../engine');
 const RUN = path.join(__dirname, '..', 'run.js');
 const P = 'demo';
@@ -93,7 +94,7 @@ test('a step with a key the engine does not know is refused before a browser ope
   fs.writeFileSync(store.planFile(P, id), "module.exports = { base: 'http://localhost:1', steps: [{ title: 'a', run: async () => {} }, { title: 'b', skipIf: () => true, run: async () => {} }] };");
   const r = cli('run', id);
   assert.strictEqual(r.status, 2);
-  assert.match(r.stderr, /step 2 \("b"\) has an unknown key "skipIf"\. A step knows: title, did, expect, run, check, approve, skipTo, probe, undo\./);
+  assert.match(r.stderr, /step 2 \("b"\) has an unknown key "skipIf"\. A step knows: title, did, expect, run, check, approve, skipTo, probe, undo, db\./);
   assert.ok(!fs.existsSync(store.walkDir(P, `${id}-1`)), 'no walk was started');
 });
 
@@ -101,16 +102,23 @@ test('environments: the plan is its own, envs override base, start and data, and
   const plan = { base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' },
     envs: { test: { base: 'https://test01/App', data: { order: 2001 } }, uat: { start: '/home' } } };
   assert.strictEqual(checkEnvs(plan), null);
-  assert.deepStrictEqual(pickEnv(plan, undefined), { name: null, base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' } });
-  assert.deepStrictEqual(pickEnv(plan, 'test'), { name: 'test', base: 'https://test01/App', start: '/orders/1001', data: { order: 2001, user: 'smoke' } });
-  assert.deepStrictEqual(pickEnv(plan, 'uat'), { name: 'uat', base: 'https://localhost:5001', start: '/home', data: { order: 1001, user: 'smoke' } });
-  assert.deepStrictEqual(pickEnv({ steps: [] }, undefined), { name: null, base: null, start: '/', data: {} });
+  assert.deepStrictEqual(pickEnv(plan, undefined), { name: null, base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' }, db: null });
+  assert.deepStrictEqual(pickEnv(plan, 'test'), { name: 'test', base: 'https://test01/App', start: '/orders/1001', data: { order: 2001, user: 'smoke' }, db: null });
+  assert.deepStrictEqual(pickEnv(plan, 'uat'), { name: 'uat', base: 'https://localhost:5001', start: '/home', data: { order: 1001, user: 'smoke' }, db: null });
+  assert.deepStrictEqual(pickEnv({ steps: [] }, undefined), { name: null, base: null, start: '/', data: {}, db: null });
+  // An environment's db replaces the plan's whole: a test server's database is another one.
+  const withDb = { db: { server: 'localhost', database: 'App' }, envs: { test: { db: { server: 'sql01', database: 'AppTest', login: 'windows' } }, uat: {} } };
+  assert.deepStrictEqual(pickEnv(withDb, 'test').db, { server: 'sql01', database: 'AppTest', login: 'windows' });
+  assert.deepStrictEqual(pickEnv(withDb, 'uat').db, { server: 'localhost', database: 'App' });
   assert.throws(() => pickEnv(plan, 'prod'), /no environment "prod"\. Its environments: test, uat\./);
   assert.throws(() => pickEnv({}, 'test'), /has no environments/);
   for (const [bad, msg] of [
     [{ envs: {} }, /at least one environment/],
     [{ envs: { test: { base: 'test01' } } }, /envs\.test: base "test01" is not a URL/],
-    [{ envs: { test: { url: 'https://x' } } }, /envs\.test has an unknown key "url"\. An environment knows: base, start, data\./],
+    [{ envs: { test: { url: 'https://x' } } }, /envs\.test has an unknown key "url"\. An environment knows: base, start, data, db\./],
+    [{ envs: { test: { db: { server: 'sql01' } } } }, /envs\.test: db must be \{ server: 'sql01', database: 'AppTest', login: 'sql' \| 'windows' \}/],
+    [{ db: { server: 'sql01', database: 'AppTest', login: 'kerberos' } }, /the plan: db must be/],
+    [{ db: { server: 'sql01', database: 'AppTest', password: 'x' } }, /the plan: db must be/],
     [{ envs: { test: { data: [1] } } }, /envs\.test: data must be an object/],
     [{ envs: { 'te st': {} } }, /not a usable name/],
     [{ data: 'x' }, /the plan: data must be an object/],
@@ -185,6 +193,107 @@ test('an undo belongs to a permitted step and has a what and a run; the report k
   assert.strictEqual(report.finalStates(events).get(1).answer, 'pass', 'undo events leave the step\'s answer alone');
   assert.match(report.build({ ...meta, lang: 'tr' }, events, null).markdown, /## Geri alma[\s\S]*⏳ geri alınmadı/);
   assert.doesNotMatch(report.build(meta, events.filter(e => e.kind !== 'undo'), null).markdown, /Undo|Not put back/, 'no undo, no section');
+});
+
+// ---- the test database (sqlcmd; the tests use fake-sqlcmd.js in its place) ----
+
+const FAKE_SQLCMD = path.join(__dirname, 'fake-sqlcmd.js');
+/** Runs fn with the fake sqlcmd and its settings in the environment, then puts the environment back. */
+async function withFakeSqlcmd(settings, fn) {
+  const keys = ['GUIDED_SMOKE_SQLCMD', 'FAKE_SQLCMD_ACCOUNT', 'FAKE_SQLCMD_LOG', 'FAKE_SQLCMD_ANSWERS', 'SQLCMDUSER', 'SQLCMDPASSWORD'];
+  const before = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+  Object.assign(process.env, { GUIDED_SMOKE_SQLCMD: FAKE_SQLCMD, ...settings });
+  try { return await fn(); } finally {
+    for (const k of keys) { if (before[k] === undefined) delete process.env[k]; else process.env[k] = before[k]; }
+  }
+}
+
+test('sqlcmd\'s output reads as rows, the count of affected rows and the first value; a failure only as its kind', () => {
+  assert.deepStrictEqual(sqlDb.parse('2001\t2026-12-01\r\n2002\tNULL\r\n\r\n(2 rows affected)\r\n'),
+    { rows: [['2001', '2026-12-01'], ['2002', 'NULL']], affected: 2, value: '2001' });
+  assert.deepStrictEqual(sqlDb.parse('\r\n(1 row affected)\r\n'), { rows: [], affected: 1, value: null });
+  assert.deepStrictEqual(sqlDb.parse(''), { rows: [], affected: null, value: null });
+  for (const [text, kind] of [
+    ["Sqlcmd: Error: Microsoft ODBC Driver 18 for SQL Server : Login failed for user 'x'..", 'login'],
+    ['Sqlcmd: Error: Microsoft ODBC Driver 17 for SQL Server : Cannot open database "AppTest" requested by the login.', 'database'],
+    ['Sqlcmd: Error: Microsoft ODBC Driver 18 for SQL Server : TCP Provider: No such host is known.', 'network'],
+    ['Sqlcmd: Error: Microsoft ODBC Driver 18 for SQL Server : Login timeout expired.', 'network'],
+    ["Msg 208, Level 16, State 1, Server sql01, Line 1\r\nInvalid object name 'x'.", 'query'],
+  ]) assert.strictEqual(sqlDb.classify(text), kind, text);
+  assert.strictEqual(sqlDb.classify('', { code: 'ENOENT' }), 'tool');
+  assert.strictEqual(sqlDb.classify('', { killed: true }), 'timeout');
+});
+
+test('sql() hands the account to sqlcmd in its environment only, reads the query from a file it removes, and hides sqlcmd\'s messages', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-sql-test-'));
+  const log = path.join(dir, 'log.jsonl');
+  const answers = path.join(dir, 'answers.json');
+  fs.writeFileSync(answers, JSON.stringify({
+    'SELECT due FROM orders WHERE id = 2001': '2026-12-01\r\n\r\n(1 rows affected)\r\n',
+    "SELECT name FROM customers WHERE name = N'Işık Çağrı'": 'Işık Çağrı\r\n\r\n(1 rows affected)\r\n',
+  }));
+  const password = 'Pa55-not-in-argv';
+  const config = { server: 'sql01', database: 'AppTest' };
+  const entries = () => fs.readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  await withFakeSqlcmd({ FAKE_SQLCMD_ACCOUNT: `smoke-user:${password}`, FAKE_SQLCMD_LOG: log, FAKE_SQLCMD_ANSWERS: answers }, async () => {
+    const r = await sqlDb.runSql({ db: config, account: { user: 'smoke-user', password }, query: 'SELECT due FROM orders WHERE id = 2001' });
+    assert.deepStrictEqual(r, { rows: [['2026-12-01']], affected: 1, value: '2026-12-01' });
+    const [first] = entries();
+    assert.deepStrictEqual([first.user, first.envPassword], ['smoke-user', true]);
+    assert.ok(!first.args.some(a => a.includes(password) || a.includes('smoke-user')), 'no account in the arguments');
+    assert.ok(!first.args.includes('-U') && !first.args.includes('-P') && !first.args.includes('-E'));
+    for (const [flag, value] of [['-S', 'sql01'], ['-d', 'AppTest'], ['-f', 'i:65001,o:65001'], ['-s', '\t']]) {
+      assert.strictEqual(first.args[first.args.indexOf(flag) + 1], value, flag);
+    }
+    assert.ok(first.args.includes('-C') && first.args.includes('-b'));
+    assert.ok(!fs.existsSync(first.args[first.args.indexOf('-i') + 1]), 'the query file is removed');
+    assert.ok(!fs.existsSync(first.args[first.args.indexOf('-o') + 1]), 'the output file is removed');
+    // Turkish letters go in and come back as typed: both files are UTF-8.
+    assert.strictEqual((await sqlDb.runSql({ db: config, account: { user: 'smoke-user', password }, query: "SELECT name FROM customers WHERE name = N'Işık Çağrı'" })).value, 'Işık Çağrı');
+
+    const refused = await sqlDb.runSql({ db: config, account: { user: 'smoke-user', password: 'wrong' }, query: 'SELECT 1' }).catch(e => e);
+    assert.deepStrictEqual([refused.kind, refused.message], ['login', 'sql login']);
+    const unknown = await sqlDb.runSql({ db: config, account: { user: 'smoke-user', password }, query: 'SELECT * FROM nowhere' }).catch(e => e);
+    assert.deepStrictEqual([unknown.kind, unknown.message], ['query', 'sql query'], 'sqlcmd\'s message (a table name, a server) stays out');
+    const far = await sqlDb.runSql({ db: { ...config, server: 'unreachable' }, account: { user: 'smoke-user', password }, query: 'SELECT 1' }).catch(e => e);
+    assert.strictEqual(far.kind, 'network');
+
+    // A Windows sign-in: -E, and no account from this process's own environment reaches sqlcmd.
+    process.env.SQLCMDUSER = 'inherited';
+    process.env.SQLCMDPASSWORD = 'inherited-password';
+    await sqlDb.runSql({ db: { ...config, login: 'windows' }, account: null, query: 'SELECT 1' });
+    const last = entries().pop();
+    assert.ok(last.args.includes('-E'));
+    assert.deepStrictEqual([last.user, last.envPassword], [null, false]);
+    assert.strictEqual(await sqlDb.version(), '99.0.1');
+  });
+  await withFakeSqlcmd({ GUIDED_SMOKE_SQLCMD: 'no-such-sqlcmd-here' }, async () => {
+    const missing = await sqlDb.runSql({ db: config, account: null, query: 'SELECT 1' }).catch(e => e);
+    assert.strictEqual(missing.kind, 'tool');
+    assert.strictEqual(await sqlDb.version(), null);
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('doctor names sqlcmd; a step\'s db is true or false', async () => {
+  await withFakeSqlcmd({}, async () => assert.match(cli('doctor').stdout, /^sqlcmd: 99\.0\.1$/m));
+  const id = '7007-db-step';
+  fs.mkdirSync(store.planDir(P, id), { recursive: true });
+  fs.writeFileSync(store.planFile(P, id), "module.exports = { base: 'http://localhost:1', steps: [{ title: 'a', db: 'yes', run: async () => {} }] };");
+  const r = cli('run', id);
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /step 1 db must be true or false/);
+});
+
+test('the report says whether the walk had its database, and why a step that needs it was skipped', () => {
+  const meta = { totalSteps: 1, titles: ['Count'], lang: 'en', walkId: 'd-1', planId: 'd', readyAt: '2026-11-03T08:00:00Z',
+    result: 'completed', browser: 'chrome', browserSource: 'requested', base: 'https://test01/App' };
+  const events = [{ n: 1, title: 'Count', answer: 'skip', reason: 'no-db' }];
+  const md = report.build({ ...meta, db: 'none' }, events, null).markdown;
+  assert.match(md, /\*\*Database:\*\* none: the steps that need it were skipped/);
+  assert.match(md, /\| 1 \| Count \| ⏭ skipped \(no database\) \|/);
+  assert.match(report.build({ ...meta, db: 'sql', lang: 'tr' }, [], null).markdown, /\*\*Veritabanı:\*\* SQL hesabıyla bağlandı/);
+  assert.doesNotMatch(report.build(meta, [], null).markdown, /Database/, 'a plan without a database: no line');
 });
 
 test('only loopback addresses count as local', () => {

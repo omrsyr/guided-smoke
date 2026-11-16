@@ -4,7 +4,8 @@
 rebuilds it. It contains:
 
 - **Header:** walk id, plan, work item, date and time, **measured walk time** (from the start page being ready to the
-  last answer; sign-in wait excluded), browser, the environment (with `--env`), address, result (completed / stopped /
+  last answer; sign-in wait excluded), browser, the environment (with `--env`), address, the test database (with
+  `db`: connected with a SQL or the Windows account, or none and its steps skipped), result (completed / stopped /
   error), filter, and links to the recordings of `--trace` / `--video` with a reminder to keep them on this machine.
 - **Summary:** ✔ passed · ✖ different · ⏭ skipped · ○ not run, and the steps passed although their automatic check
   failed (also flagged in the note column and in the paste block). Mention them to the user; they still count as

@@ -11,7 +11,8 @@ description: >
 license: MIT
 compatibility: >
   Claude Code (or any agent with shell access) on Windows, macOS or Linux; Node.js 20+; Google Chrome or Microsoft
-  Edge installed; the application under test reachable from this machine.
+  Edge installed; the application under test reachable from this machine; sqlcmd only for a plan with a SQL Server
+  test database.
 metadata:
   author: omrsyr
   version: "1.4.2"
@@ -81,7 +82,7 @@ Flags (order free; unknown flags and bad values are refused with a clear message
 All work goes through `node <skill-dir>/engine/run.js` (`<skill-dir>` is this file's folder):
 
 ```text
-node run.js doctor                    data folder, project, chosen browser, runtime — run this first
+node run.js doctor                    data folder, project, chosen browser, runtime, sqlcmd — run this first
 node run.js setup                     install playwright-core once (asks npm; get the user's OK first)
 node run.js setup --video             also fetch Playwright's ffmpeg for --video (about 4 MB; get the user's OK first)
 node run.js init <plan-id> [--title T] [--work-item N]   create plans/<plan-id>/steps.js from the template
@@ -112,7 +113,8 @@ The project is the git repository's folder name (override with `--project`). Dat
 ## Rules that always hold
 
 - The user signs in. Never type, store, print or ask for a password; the browser's own password saving is off in the
-  smoke profile. An account a step needs for an API call is typed by the user into the value box (`secretBox`).
+  smoke profile. An account a step needs for an API call is typed by the user into the value box (`secretBox`); a
+  test database account (a plan with `db`) into the engine's own tab before the sign-in.
 - A permitted step (`approve`) is the only way to change anything outside the page. Show exactly what will change, limit
   it to one test record, and never print connection strings or keys. Give it an `undo` when the change can be put
   back: the walk puts it back when it ends, also after Stop.

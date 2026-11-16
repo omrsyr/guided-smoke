@@ -10,6 +10,7 @@ const { texts, format } = require('./i18n');
 const { Bucket, fromConsole, fromPageError, fromResponse, fromFailed, compileIgnore, total: errorTotal, ABORTED } = require('./errors');
 const { Network, findingTotal } = require('./network');
 const probing = require('./probe');
+const { runSql } = require('./db');
 
 const PACE = { slow: 400, normal: 200, fast: 60 };
 const DEFAULT_LOGIN = /(login|signin|sign-in|giris|auth|account\/)/i;
@@ -342,6 +343,81 @@ function drawBox(s) {
   box.__guidedSmokeWaiting = waiting;
 }
 
+// Runs in the engine's own tab (about:blank: no page of the application can reach it). Draws the database form: the
+// server and the database as text, the user's account as inputs (none with a Windows sign-in), and Connect, Continue
+// without and Stop. What is typed goes to the engine only through this tab's own binding; the tab is closed once
+// answered. s.error shows why the last try failed; window.__guidedSmokeDbError(text) shows a new one without redrawing,
+// so what was typed stays. The form carries data-ready while its buttons can be pressed.
+function drawDbForm(s) {
+  document.title = s.title;
+  document.body.textContent = '';
+  const el = (tag, text, style) => {
+    const e = document.createElement(tag);
+    if (text) e.textContent = text;
+    if (style) Object.assign(e.style, style);
+    return e;
+  };
+  Object.assign(document.body.style, { margin: '0', background: '#f1f3f5', color: '#212529', font: '15px/1.5 "Segoe UI", system-ui, sans-serif' });
+  const box = el('div', null, {
+    maxWidth: '520px', margin: '48px auto', background: '#fff', border: '1px solid #ced4da', borderLeft: '6px solid #0d6efd',
+    borderRadius: '8px', padding: '18px 20px', boxShadow: '0 8px 24px rgba(0,0,0,.15)',
+  });
+  box.id = '__guided_smoke_db';
+  box.appendChild(el('div', s.title, { fontWeight: '600', fontSize: '18px', marginBottom: '6px' }));
+  box.appendChild(el('div', s.intro));
+  const facts = el('div', null, { margin: '12px 0', padding: '8px 10px', background: '#f8f9fa', borderRadius: '6px', fontFamily: 'Consolas, monospace', fontSize: '13px' });
+  facts.appendChild(el('div', `${s.serverLabel}: ${s.server}`));
+  facts.appendChild(el('div', `${s.databaseLabel}: ${s.database}`));
+  box.appendChild(facts);
+  const input = (label, name, secret) => {
+    const l = el('label', label, { display: 'block', marginTop: '8px', fontSize: '13px' });
+    const i = el('input', null, { display: 'block', width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '6px 8px', border: '1px solid #ced4da', borderRadius: '4px', font: 'inherit' });
+    i.type = secret ? 'password' : 'text';
+    i.autocomplete = secret ? 'new-password' : 'off';
+    i.spellcheck = false;
+    i.setAttribute('data-guided-smoke-db', name);
+    l.appendChild(i);
+    box.appendChild(l);
+    return i;
+  };
+  const user = s.windows ? null : input(s.userLabel, 'user', false);
+  const password = s.windows ? null : input(s.passwordLabel, 'password', true);
+  const error = el('div', s.error || '', { marginTop: '10px', color: '#dc3545', fontWeight: '600', minHeight: '1.5em' });
+  error.setAttribute('data-guided-smoke-db-error', '');
+  box.appendChild(error);
+  const bar = el('div', null, { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' });
+  const buttons = [];
+  const ready = on => {
+    buttons.forEach(b => { b.disabled = !on; b.style.opacity = on ? '1' : '.6'; });
+    if (on) box.setAttribute('data-ready', ''); else box.removeAttribute('data-ready');
+  };
+  const send = (action, ...values) => { ready(false); window.__guidedSmokeDb(action, ...values); };
+  [['connect', s.connect, '#198754'], ['skip', s.skip, '#fd7e14'], ['stop', s.stop, '#6c757d']].forEach(([action, label, color]) => {
+    const b = el('button', label, { background: color, color: '#fff', border: '0', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer', font: 'inherit', fontWeight: '600' });
+    b.setAttribute('data-guided-smoke-db-answer', action);
+    b.onclick = () => {
+      if (action !== 'connect') { send(action); return; }
+      if (user && (!user.value || !password.value)) { error.textContent = s.empty; return; }
+      error.textContent = s.busy;
+      error.style.color = '#0d6efd';
+      if (user) send('connect', user.value, password.value); else send('connect');
+    };
+    buttons.push(b);
+    bar.appendChild(b);
+  });
+  if (password) password.onkeydown = e => { if (e.key === 'Enter') buttons[0].click(); };
+  box.appendChild(bar);
+  box.appendChild(el('div', s.note, { marginTop: '10px', fontSize: '12px', color: '#6c757d' }));
+  document.body.appendChild(box);
+  window.__guidedSmokeDbError = text => {
+    error.textContent = text;
+    error.style.color = '#dc3545';
+    ready(true);
+  };
+  ready(true);
+  if (user) user.focus();
+}
+
 // Runs in the page. Shows the step's browser errors and network view ({ errors, network }) in the drawn panel without
 // redrawing it, so a note being typed stays.
 function updateErrors(view) {
@@ -580,8 +656,8 @@ function firstLine(error) {
  * @param {object} o.options    { browser, base, pace, allowed:Set|null, filterNote, skipWrites, allowRemoteWrites, workItem,
  *                                fresh, screens:'diff'|'all'|null, locale, lang, keepDownloads, auto, trace, video,
  *                                panel: { side:'left'|'right', min }, network: compileConfig(plan.network)|null, probe,
- *                                env: name|null, start, data } — env, start and data from envs.pickEnv (default: the
- *                                plan's own)
+ *                                env: name|null, start, data, db } — env, start, data and db from envs.pickEnv
+ *                                (default: the plan's own)
  */
 async function walk(o) {
   const { plan, planId, walkId, project, walkDir, playwright, options } = o;
@@ -1106,6 +1182,74 @@ async function walk(o) {
   // The step's network record: waits up to a second for bodies still being read.
   const takeNetwork = async () => (net ? net.take() : undefined);
 
+  // ---- the test database: the engine's own tab before the sign-in, then sql() through sqlcmd ----
+  // The account typed there lives only in `db` while the walk runs. sqlcmd's messages are never shown: a failure says
+  // only its kind (the account, the database, the network, sqlcmd missing, a query).
+  const dbConfig = options.db || plan.db || null;
+  const db = { account: null, ready: false };
+  if (dbConfig) meta.db = 'none';
+  const sqlRun = async query => {
+    if (!db.ready) throw new Error(dbConfig ? t.dbNone : t.dbNotSet);
+    try {
+      return await runSql({ db: dbConfig, account: db.account, query });
+    } catch (e) {
+      throw new Error(format(t.dbFailed, { why: t.dbKinds[e.kind] || t.dbKinds.query }));
+    }
+  };
+  const tryDb = async account => {
+    try { await runSql({ db: dbConfig, account, query: 'SELECT 1' }); return null; } catch (e) { return e.kind || 'query'; }
+  };
+  /** Before the sign-in: connects, asking for an account in the engine's own tab; 'stop' when the user stops there. */
+  const connectDb = async () => {
+    if (!dbConfig) return null;
+    const windows = (dbConfig.login || 'sql') === 'windows';
+    let failed = windows ? await tryDb(null) : null;
+    if (windows && !failed) {
+      db.ready = true;
+      meta.db = 'windows';
+      saveMeta();
+      return null;
+    }
+    const tab = await context.newPage();
+    const tabVideo = options.video ? tab.video() : null;
+    let answer = null;
+    const tabClosed = new Promise(resolve => tab.once('close', () => resolve({ a: 'skip' })));
+    await tab.exposeFunction('__guidedSmokeDb', (a, user, password) => {
+      if (answer) { const r = answer; answer = null; r({ a, user, password }); }
+    });
+    await tab.evaluate(drawDbForm, {
+      title: t.dbTitle, intro: windows ? t.dbIntroWindows : t.dbIntro, windows, serverLabel: t.dbServer, server: dbConfig.server,
+      databaseLabel: t.dbDatabase, database: dbConfig.database, userLabel: t.dbUser, passwordLabel: t.dbPassword,
+      connect: windows ? t.dbRetry : t.dbConnect, skip: t.dbSkip, stop: t.stop, note: t.dbNote, busy: t.dbBusy, empty: t.dbEmpty,
+      error: failed ? t.dbKinds[failed] : '',
+    });
+    let outcome = null;
+    for (;;) {
+      const res = await Promise.race([new Promise(resolve => { answer = resolve; }), tabClosed]);
+      if (closed || res.a === 'stop') { outcome = 'stop'; break; }
+      if (res.a !== 'connect') break;
+      const account = windows ? null : { user: String(res.user || ''), password: String(res.password || '') };
+      failed = await tryDb(account);
+      if (!failed) {
+        db.account = account;
+        db.ready = true;
+        meta.db = windows ? 'windows' : 'sql';
+        break;
+      }
+      await tab.evaluate(text => window.__guidedSmokeDbError(text), t.dbKinds[failed]).catch(() => {});
+    }
+    await tab.close().catch(() => {});
+    // That tab's recording would show the account's name: it is not kept.
+    if (tabVideo) {
+      const i = videos.indexOf(tabVideo);
+      if (i >= 0) videos.splice(i, 1);
+      await tabVideo.delete().catch(() => {});
+    }
+    if (!closed) await page.bringToFront().catch(() => {});
+    saveMeta();
+    return outcome;
+  };
+
   const ctx = {
     page, context, base, lang: options.lang, state: {}, walkDir,
     // The environment's test records (envs.<name>.data over the plan's data).
@@ -1138,6 +1282,7 @@ async function walk(o) {
     },
     sleep: ms => page.waitForTimeout(ms),
     log: message => console.log(String(message)),
+    sql: query => sqlRun(query),
   };
 
   // ---- undo: what a permitted step changed, put back by the plan's own code ----
@@ -1148,7 +1293,7 @@ async function walk(o) {
   const undos = [];
   const undone = [];
   const undoCtx = () => ({
-    state: ctx.state, data: ctx.data, base, url: ctx.url, log: ctx.log,
+    state: ctx.state, data: ctx.data, base, url: ctx.url, log: ctx.log, sql: sqlRun,
     poll: (fn, opts) => poll(fn, opts),
   });
   const runUndo = async (u, by, inStep) => {
@@ -1180,7 +1325,7 @@ async function walk(o) {
     while (undos.length) await runUndo(undos.pop(), by);
   };
 
-  for (const name of ['goto', 'mark', 'text', 'secretBox', 'inPage', 'probe', 'poll', 'visible', 'count', 'submit', 'download', 'sleep', 'undo']) {
+  for (const name of ['goto', 'mark', 'text', 'secretBox', 'inPage', 'probe', 'poll', 'visible', 'count', 'submit', 'download', 'sleep', 'undo', 'sql']) {
     const helper = ctx[name];
     ctx[name] = async (...args) => {
       if (stopRequested) throw new Error(STOPPED);
@@ -1191,6 +1336,9 @@ async function walk(o) {
   let stopped = false;
   let currentStep = null;
   try {
+    // The test database is asked for first, in a tab of its own: no page of the application is open yet.
+    const dbStop = await connectDb();
+
     // ---- sign-in: always the user's; the script only waits until the browser leaves the sign-in pages ----
     const start = options.start || plan.start || '/';
     const loginRe = plan.login ? new RegExp(plan.login, 'i') : DEFAULT_LOGIN;
@@ -1201,8 +1349,8 @@ async function walk(o) {
     watching = true;
     seen.clear();
     if (net) net.clear();
-    await ctx.goto(start);
-    while (!closed && !(await isReady().catch(() => false))) {
+    if (!dbStop) await ctx.goto(start);
+    while (!dbStop && !closed && !(await isReady().catch(() => false))) {
       if (Date.now() > deadline) throw new Error('Sign-in was not completed within 15 minutes.');
       await draw({ header: format(t.step, { n: 0, total }), accent: COLORS.warn, t, didLabel: t.did, expectLabel: t.todo,
         title: t.loginTitle, did: t.loginDid, expect: t.loginExpect, buttons: [] });
@@ -1213,11 +1361,12 @@ async function walk(o) {
       if (net) net.clear();
       await ctx.goto(start).catch(() => {});
     }
-    if (closed) {
-      // The window was closed before signing in: a stop, not an error.
+    if (closed || dbStop) {
+      // The window was closed, or Stop pressed in the database tab, before signing in: a stop, not an error.
       meta.endedAt = new Date().toISOString();
       meta.result = 'stopped';
-      meta.error = 'browser closed before sign-in';
+      meta.error = dbStop ? 'stopped at the database form' : 'browser closed before sign-in';
+      db.account = null;
       saveMeta();
       await closeBrowser();
       dropFreshProfile();
@@ -1236,6 +1385,12 @@ async function walk(o) {
       if (options.allowed && !options.allowed.has(n)) { record({ n, title: s.title, answer: 'skip', reason: 'filter' }); continue; }
       // A probe step runs only when asked for (--probe), and it always asks first: it may save what it sends.
       if (s.probe && !options.probe) { record({ n, title: s.title, answer: 'skip', reason: 'probe' }); continue; }
+      // A step that needs the test database is skipped without one, as a declined permitted step is.
+      if (s.db && !db.ready) {
+        record({ n, title: s.title, answer: 'skip', reason: 'no-db' });
+        if (s.skipTo) skipUntil = Number(s.skipTo);
+        continue;
+      }
       const approve = s.approve || (s.probe ? { what: t.probeWhat } : null);
       shotIndex = n;
       lastShot = null;
@@ -1340,6 +1495,7 @@ async function walk(o) {
       }
       await undoRest(closed ? 'close' : stopped ? 'stop' : 'end');
     }
+    db.account = null;
     const undoFailed = undone.filter(u => u.error);
 
     // ---- closing screen ----
@@ -1369,6 +1525,7 @@ async function walk(o) {
     saveMeta();
     // The test data comes first: put back what the allowed steps changed before anything else can fail.
     await undoRest('error');
+    db.account = null;
     await tracePause();
     await closeBrowser();
     dropFreshProfile();
@@ -1376,4 +1533,4 @@ async function walk(o) {
   }
 }
 
-module.exports = { walk, appUrl, isLocal, normalizeCheck, expectLabel, drawPanel, drawBox, emptyFields, seenIndices, redact, poll, isFunctionExpression, widen, PACE };
+module.exports = { walk, appUrl, isLocal, normalizeCheck, expectLabel, drawPanel, drawBox, drawDbForm, emptyFields, seenIndices, redact, poll, isFunctionExpression, widen, PACE };

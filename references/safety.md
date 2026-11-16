@@ -24,6 +24,12 @@
 - A step that needs an account of its own (an API call) asks the user to type it into the value box (`secretBox`).
   The values stay in the page: the engine never reads them, `inPage` masks them (`•••`) in what it returns, and a
   page load clears them. Masking is a safety net, not a licence: return only statuses and counts.
+- A test database account (a plan with `db`, `login: 'sql'`) is typed by the user into the engine's own tab, opened
+  before the sign-in at `about:blank`: no page of the application can reach it. This is the one secret the engine
+  itself holds, on purpose, since the browser cannot reach a SQL Server: it stays in this process's memory for the
+  walk, reaches `sqlcmd` as `SQLCMDUSER` / `SQLCMDPASSWORD` in its environment (never an argument, a file, a record or
+  a trace), and with `--video` that tab's recording is deleted. sqlcmd's messages are reduced to their kind. Ask for
+  an account limited to the test database (read, and write only where the plan's permitted steps need it).
 - Never print connection strings, keys, license keys or file contents into the panel, the events, the report or the
   chat. Read configuration without echoing it.
 
@@ -55,7 +61,8 @@ applies to it.
 - Give the step an `undo` when its change can be put back (writing-steps rule 9): on a shared test server the next
   tester finds the record as it was. The approval panel shows what the undo will put back; the undo runs without
   asking again, limited to what the step changed.
-- Use the project's existing database tooling; read credentials from configuration without printing them.
+- On SQL Server use `sql()` with the plan's `db` (writing-steps rule 20); otherwise the project's existing database
+  tooling, reading credentials from configuration without printing them.
 
 ## Recordings (`--video`, `--trace`)
 

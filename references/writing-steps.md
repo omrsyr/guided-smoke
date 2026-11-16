@@ -16,8 +16,10 @@ module.exports = {
   ignoreErrors: ['GET /hub/negotiate → 404'],   // optional: known browser noise (see rule 16)
   network: { slowMs: 1000, origins: ['https://api.example.com'], ignore: ['/hub/'] },   // optional, for --network (rule 17)
   data: { order: 1001 },            // optional: the test records the steps use (ctx.data)
+  db: { server: 'localhost', database: 'Orders', login: 'windows' },   // optional: the test database for sql() (rule 20)
   envs: {                           // optional: other environments, picked with --env (rule 19)
-    test: { base: 'https://test01/Orders', start: '/orders/2001', data: { order: 2001 } },
+    test: { base: 'https://test01/Orders', start: '/orders/2001', data: { order: 2001 },
+      db: { server: 'sqltest01', database: 'OrdersTest', login: 'sql' } },
   },
   steps: [ /* … */ ],
 };
@@ -53,6 +55,7 @@ The step context (`ctx`) offers:
 | `probe({ field, submit, saved, message, values })` | Send one field's form once per value and sort what happened; only in a step marked `probe: true` (rule 18, [probing](probing.md)) |
 | `state` | An object shared by all steps of the walk |
 | `data` | The environment's test records: the plan's `data` with the chosen environment's laid over it (rule 19) |
+| `sql(query)` | Run SQL on the environment's test database (rule 20): `{ rows, affected, value }`, every field as text |
 | `url(path)` | The full address of a path of the application, read as `goto` reads it |
 | `sleep(ms)`, `log(msg)`, `walkDir` | — |
 
@@ -154,3 +157,17 @@ For an API that needs the user's account, the project's database tool, or a back
     environments with a module of their own: `envs: require('../envs')`. The walk records the environment's name; its
     report names it and compares only with earlier walks in the same environment, and `--retry-failed` reruns the ✖
     steps of the newest walk there. The remote-address rule for permitted steps is unchanged.
+20. **The test database (`db`, `sql()`, `db: true`).** A plan or environment with `db: { server, database, login }`
+    (SQL Server, through `sqlcmd`) gets `sql(query)` in its steps and undos. With `login: 'sql'` (the default) the
+    engine opens a tab of its own before the sign-in, shows the server and the database, and the **user** types an
+    account there; the engine tries it at once and asks again when it is refused. The account stays in the engine's
+    memory for the walk and reaches sqlcmd in its environment only. With `login: 'windows'` the user's Windows account
+    is used and the tab opens only when it fails. **Continue without the database** skips every step marked `db: true`
+    ("no database", following its `skipTo` as a declined step does); `sql()` elsewhere then throws. Mark every step
+    that needs the database `db: true`.
+
+    `sql()` returns `rows` (arrays of text, `NULL` as written), `affected` (the last "rows affected" count) and `value`
+    (the first column of the first row). A failure says only its kind (the account, the database, the network, sqlcmd
+    missing, a query): sqlcmd's message may hold data and is never shown. Write fixed query text with ids from `data`
+    or `state`, select only counts and states, and put no row into `did`, `expect`, a check text or `log`. A write is
+    a permitted step with an `undo` (rule 9). See [patterns](patterns.md#reading-and-writing-the-database).

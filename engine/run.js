@@ -142,7 +142,7 @@ function planSource(planPath) {
 
 // What a step may say. Anything else is a mistake the engine would otherwise pass over in silence (a skipIf that never
 // skips), so it is refused like an unknown flag.
-const STEP_KEYS = ['title', 'did', 'expect', 'run', 'check', 'approve', 'skipTo', 'probe', 'undo'];
+const STEP_KEYS = ['title', 'did', 'expect', 'run', 'check', 'approve', 'skipTo', 'probe', 'undo', 'db'];
 
 function loadPlan(file) {
   delete require.cache[require.resolve(file)];
@@ -157,6 +157,7 @@ function loadPlan(file) {
     if (typeof s.run !== 'function') throw new UsageError(`${file}: step ${i + 1} ("${s.title}") has no run function.`);
     if (s.check && typeof s.check !== 'function') throw new UsageError(`${file}: step ${i + 1} check must be a function.`);
     if (s.probe !== undefined && typeof s.probe !== 'boolean') throw new UsageError(`${file}: step ${i + 1} probe must be true or false.`);
+    if (s.db !== undefined && typeof s.db !== 'boolean') throw new UsageError(`${file}: step ${i + 1} db must be true or false.`);
     if (s.skipTo && !s.approve && !s.probe) throw new UsageError(`${file}: step ${i + 1} uses skipTo without approve.`);
     if (s.undo !== undefined) {
       if (!s.approve && !s.probe) throw new UsageError(`${file}: step ${i + 1} ("${s.title}") has an undo but asks no permission: undo belongs to a permitted step (approve).`);
@@ -269,6 +270,8 @@ async function main() {
       systemDefault: browser.systemDefault(), chrome: browser.installed('chrome'), edge: browser.installed('edge'),
       browser: chosen, browserError,
       video: runtime !== 'missing' && browser.videoReady(store.runtimeDir()) ? 'ready' : 'missing (node run.js setup --video)',
+      // Only a plan with a test database needs it (db: { server, database }).
+      sqlcmd: (await require('./db').version()) || 'missing (needed only for a plan with db)',
     };
     out(flags, data, Object.entries(data).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n'));
     return runtime === 'missing' ? EXIT.runtime : EXIT.ok;
@@ -451,7 +454,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
         lang: pickLanguage(flags.lang || plan.lang), keepDownloads: !!flags['keep-downloads'],
         auto: !!flags.auto, trace: !!flags.trace, video: !!flags.video, panel,
         network: flags.network ? compileConfig(plan.network) : null, probe: !!flags.probe,
-        env: env.name, start: env.start, data: env.data,
+        env: env.name, start: env.start, data: env.data, db: env.db,
       },
     });
   } catch (e) {

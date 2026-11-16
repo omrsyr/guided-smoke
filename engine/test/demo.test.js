@@ -10,7 +10,7 @@ const path = require('path');
 const store = require('../store');
 const browser = require('../browser');
 const report = require('../report');
-const { texts } = require('../i18n');
+const { texts, format } = require('../i18n');
 const network = require('../network');
 const { autoWalk } = require('./harness');
 
@@ -691,7 +691,7 @@ test('undo: the plan puts a change back itself, the rest go back after Stop, las
     });
     assert.strictEqual(meta.result, 'stopped');
     // An undo gets the walk's state and data, never the page.
-    assert.deepStrictEqual(ran, [['c'], ['b'], ['a', 'base,data,log,poll,state,url', 'T']]);
+    assert.deepStrictEqual(ran, [['c'], ['b'], ['a', 'base,data,log,poll,sql,state,url', 'T']]);
     assert.deepStrictEqual(db, { a: 'old', b: 'new', c: 'old' });
     const events = readEvents(walkDir);
     assert.ok(events.find(e => e.n === 4 && e.kind === 'step').auto.ok, 'undo(3) ran once; a step without one or not allowed gives false');
@@ -711,6 +711,89 @@ test('undo: the plan puts a change back itself, the rest go back after Stop, las
   } finally {
     await new Promise(resolve => app.close(resolve));
     fs.rmSync(walkDir, { recursive: true, force: true });
+  }
+});
+
+test('the test database: its own tab before the sign-in asks again after a refused account; sql() in steps and undo; without it, its steps are skipped; the account is never written down', { skip, timeout: 90000 }, async () => {
+  const asked = [];
+  const app = http.createServer((req, res) => {
+    asked.push(req.url);
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><title>t</title><h1 id="page">page</h1>');
+  });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-db-'));
+  const log = path.join(dir, 'sqlcmd.jsonl');
+  const answers = path.join(dir, 'answers.json');
+  fs.writeFileSync(answers, JSON.stringify({
+    'SELECT due FROM orders WHERE id = 2001': '2026-12-01\r\n\r\n(1 rows affected)\r\n',
+    'UPDATE orders SET due = NULL WHERE id = 2001': '\r\n(1 rows affected)\r\n',
+    "UPDATE orders SET due = '2026-12-01' WHERE id = 2001": '\r\n(1 rows affected)\r\n',
+  }));
+  const password = 'Db-Pa55-typed-once';
+  const env = { GUIDED_SMOKE_SQLCMD: path.join(__dirname, 'fake-sqlcmd.js'), FAKE_SQLCMD_ACCOUNT: `smoke-user:${password}`, FAKE_SQLCMD_LOG: log, FAKE_SQLCMD_ANSWERS: answers };
+  const before = Object.fromEntries(Object.keys(env).map(k => [k, process.env[k]]));
+  Object.assign(process.env, env);
+  const t = texts('en');
+  const plan = {
+    id: 'db', ready: '#page', db: { server: 'sql01', database: 'AppTest' },
+    steps: [
+      { title: 'Read', did: 'x', expect: ['x'], db: true,
+        run: async ({ sql, state }) => { state.due = (await sql('SELECT due FROM orders WHERE id = 2001')).value; },
+        check: async ({ state }) => [state.due === '2026-12-01', String(state.due)] },
+      { title: 'Change', did: 'x', expect: ['x'], db: true, approve: 'Clear order 2001\'s due date.',
+        undo: { what: 'The due date goes back.', run: async ({ sql, state }) => { await sql(`UPDATE orders SET due = '${state.due}' WHERE id = 2001`); } },
+        run: async ({ sql, state }) => { state.changed = (await sql('UPDATE orders SET due = NULL WHERE id = 2001')).affected; },
+        check: async ({ state }) => [state.changed === 1, String(state.changed)] },
+      { title: 'A query that fails', did: 'x', expect: ['x'], db: true, run: async ({ sql }) => { await sql('SELECT * FROM nowhere'); } },
+      { title: 'No db key', did: 'x', expect: ['x'],
+        run: async ({ sql, state }) => { state.r = await sql('SELECT 1').then(r => r.value, e => e.message); },
+        check: async ({ state }) => [true, state.r] },
+    ],
+  };
+  const walkWith = async (db, options = {}) => {
+    const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+    const dbErrors = [];
+    const { meta } = await autoWalk({ playwright, plan, browser: chosen, base, lang: 'en', walkDir, db, dbErrors, options });
+    return { meta, events: fs.existsSync(path.join(walkDir, 'events.jsonl')) ? readEvents(walkDir) : [], dbErrors, walkDir };
+  };
+  try {
+    // A refused account first: the tab says why, keeps what was typed, and asks again.
+    const first = await walkWith([{ user: 'smoke-user', password: 'wrong' }, { password }], noVideo ? {} : { video: true });
+    assert.strictEqual(first.meta.db, 'sql');
+    assert.deepStrictEqual(first.dbErrors, ['', t.dbKinds.login]);
+    const step = n => first.events.find(e => e.n === n && e.kind !== 'undo' && e.answer !== 'approved');
+    assert.ok(step(1).auto.ok && step(2).auto.ok, JSON.stringify([step(1).auto, step(2).auto]));
+    assert.strictEqual(step(3).auto.text, format(t.dbFailed, { why: t.dbKinds.query }), 'only the kind, never sqlcmd\'s message');
+    assert.strictEqual(step(4).auto.text, '1');
+    assert.deepStrictEqual(first.events.filter(e => e.kind === 'undo').map(e => [e.n, e.answer, e.by]), [[2, 'registered', undefined], [2, 'done', 'end']]);
+    const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+    assert.strictEqual(calls.pop().query, "UPDATE orders SET due = '2026-12-01' WHERE id = 2001", 'the undo ran its sql');
+    assert.ok(calls.every(c => !c.args.some(a => a.includes(password))), 'no password in sqlcmd\'s arguments');
+    const files = [];
+    const collect = d => fs.readdirSync(d, { withFileTypes: true }).forEach(f => (f.isDirectory() ? collect(path.join(d, f.name)) : files.push(path.join(d, f.name))));
+    collect(first.walkDir);
+    assert.ok(files.filter(f => !f.endsWith('.webm')).every(f => !fs.readFileSync(f, 'utf8').includes(password) && !fs.readFileSync(f, 'utf8').includes('smoke-user')), 'the account is in no record');
+    if (!noVideo) assert.deepStrictEqual(first.meta.videos, ['video/walk.webm'], 'the database tab\'s recording is not kept');
+    assert.match(report.build(first.meta, first.events, null).markdown, /\*\*Database:\*\* connected with a SQL account/);
+
+    // Continue without the database: its steps are skipped, sql() elsewhere says why.
+    const without = await walkWith(['skip']);
+    assert.strictEqual(without.meta.db, 'none');
+    assert.deepStrictEqual(without.events.filter(e => e.reason === 'no-db').map(e => e.n), [1, 2, 3]);
+    assert.strictEqual(without.events.find(e => e.n === 4).auto.text, t.dbNone);
+
+    // Stop in the tab: the walk ends before any page of the application is opened.
+    asked.length = 0;
+    const stopped = await walkWith(['stop']);
+    assert.deepStrictEqual([stopped.meta.result, stopped.meta.error], ['stopped', 'stopped at the database form']);
+    assert.deepStrictEqual(asked, []);
+    for (const w of [first, without, stopped]) fs.rmSync(w.walkDir, { recursive: true, force: true });
+  } finally {
+    for (const [k, v] of Object.entries(before)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    await new Promise(resolve => app.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

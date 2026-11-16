@@ -38,6 +38,8 @@ Check, do not assume:
   test records in `data` ([writing steps](writing-steps.md) rule 19).
 - **Database / migrations:** if the project uses manual migration scripts and the branch (or a pull) brought new ones,
   check read-only whether their objects exist on the target database. Missing scripts are the user's call to run.
+  A plan with `db` needs `sqlcmd` (`doctor` names its version); tell the user the walk will first ask for a database
+  account in a tab of its own, unless `login: 'windows'`.
 - **Test data:** find suitable records read-only (an entity in the right state, enough free capacity, an account).
   Use test records; write their ids into the plan, not the user's real data.
 

@@ -21,6 +21,9 @@ const { walk } = require('../engine');
  *                               while a countdown runs)
  * @param {boolean} [o.letAuto]  leave a panel alone while its --auto countdown runs
  * @param {string} [o.stopAt]    press Stop on the panel with this title instead of answering it
+ * @param {Array} [o.db]         answers for the engine's database tab, in order: { user, password } (Connect; without
+ *                               them, Try again), 'skip' or 'stop'
+ * @param {string[]} [o.dbErrors] receives the tab's error line as it was before each answer
  * @param {object} [o.options]   more walk options (auto, trace, video, panel)
  * @param {string} [o.profile]   a kept profile folder, as in a real walk (default: a throw-away one)
  */
@@ -35,11 +38,23 @@ async function autoWalk(o) {
     },
   };
   let busy = false;
+  const dbAnswers = [...(o.db || [])];
   const timer = setInterval(async () => {
     const page = context && context.pages()[0];
     if (busy || !page) return;
     busy = true;
     try {
+      for (const tab of dbAnswers.length ? context.pages() : []) {
+        const form = tab.locator('#__guided_smoke_db[data-ready]');
+        if (!(await form.count().catch(() => 0))) continue;
+        if (o.dbErrors) o.dbErrors.push(await form.locator('[data-guided-smoke-db-error]').textContent());
+        const next = dbAnswers.shift();
+        if (typeof next === 'object') {
+          if (next.user != null) await form.locator('[data-guided-smoke-db="user"]').fill(next.user);
+          if (next.password != null) await form.locator('[data-guided-smoke-db="password"]').fill(next.password);
+        }
+        await form.locator(`[data-guided-smoke-db-answer="${typeof next === 'object' ? 'connect' : next}"]`).click({ timeout: 2000 });
+      }
       if (o.signIn && await page.locator(o.signIn.when).count()) await o.signIn.fill(page);
       const use = page.locator('#__guided_smoke_box [data-guided-smoke-use]');
       const waiting = await use.isVisible().catch(() => false);
