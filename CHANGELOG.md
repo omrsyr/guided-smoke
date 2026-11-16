@@ -36,6 +36,10 @@
   call runs in the page and the token stays there, with a table for "the box, or the session?". A value the user
   gives put into a form of the page (a test user's password, typed into the box and placed by the step). Counting by
   id where the database's clock cannot be used, and a soft delete as clean-up.
+- **A tester's guide** ([docs/testers.md](docs/testers.md), Turkish: [docs/testers.tr.md](docs/testers.tr.md)): the
+  install, a walk of one plan and of a folder on a shared test server, what each button and question means, reading
+  the report, the retry after a fix, a plan from a work item with Claude, what makes a work item ready for a smoke,
+  and what to do when something goes wrong. The README gains "A folder of plans: a suite".
   - The suite's record and report are kept as `suites/<folder>-<n>/` in the project's data folder, numbered and never
     overwritten: a row per plan with its walk, how it ended, its counts, time and what its own report flags; where the
     suite was stopped, the plans not walked or ended with an error, changes not put back; every ✖ with its note; a

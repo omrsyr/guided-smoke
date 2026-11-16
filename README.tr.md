@@ -39,6 +39,8 @@ listesini okuman, tek başına tıklaman ya da hızla akıp giden bir betiği iz
 - Her cevap anında kaydedilir. **Rapor** geçeni ve farklı olanı, tarayıcının hata bildirdiği adımları, ölçülen koşu
   süresini, her adımın en son cevap aldığı koşudan bu yana neyin değiştiğini ve iş kaydına yapıştırılacak bir bloğu verir.
 - Düzeltmeden sonra `run 6655 --retry-failed` yalnız ✖ işaretli adımları koşar.
+- Bir plan klasörü **suite** olarak koşulur: planlar art arda, kendi makinende ya da ortak test sunucusunda, hepsinin
+  üstüne tek raporla. Testçi, geliştiricinin repoda tuttuğu planları koşar; bkz. [testçi kılavuzu](docs/testers.tr.md).
 
 ## Gereksinimler
 
@@ -101,6 +103,7 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
 /guided-smoke plan 6655           yalnız plan (tarayıcı açılmaz)
 /guided-smoke run 6655            koş (yeni koşu: 6655-machine-expiry-1, -2, …)
 /guided-smoke run 6655 --retry-failed
+/guided-smoke run smoke/ --env test   bir klasörün bütün planları, art arda (suite)
 /guided-smoke report 6655         son koşunun raporu (2. koşu için 6655-2)
 /guided-smoke list
 ```
@@ -117,8 +120,8 @@ kapanınca her şeyi unutur. Claude Code'da `/guided-smoke demo` da diyebilirsin
 
 - **Girişi sen yaparsın.** Betik parolayı hiç görmez; smoke profilinde tarayıcının parola kaydı kapalıdır. Windows
   girişli bir site Windows hesabını tarayıcıdan alır (`signIn: 'windows'` buna yalnız o adres için izin verir). Test
-  veritabanı olan bir plan, hesabını girişten önce kendi sekmesinde sorar; motor onu koşu boyunca bellekte tutar,
-  `sqlcmd`'ye ortam değişkeniyle verir ve hiçbir yere yazmaz.
+  veritabanı olan bir plan, hesabını girişten önce kendi sekmesinde sorar; motor onu koşu boyunca (plan suite'inde: son plan koşulana kadar)
+  bellekte tutar, `sqlcmd`'ye ortam değişkeniyle verir ve hiçbir yere yazmaz.
 - Bir adımın sayfa dışında yaptığı değişiklikler (bir veritabanı satırı, bir iş) yalnız sen izin verince olur; `undo`
   taşıyan adım değişikliğini koşu bitince, ■ Durdur'dan sonra da geri alır. Rapor neyin geri alındığını, neyin
   alınmadığını söyler.
@@ -184,6 +187,28 @@ node ~/guided-smoke/engine/run.js run smoke/6655-machine-expiry.steps.js --env t
 Rapor ortamı ve sürümü yazar, bir koşuyu yalnız aynı sunucudaki önceki koşularla karşılaştırır. İzinli adımlar uzak
 adreste `--allow-remote-writes` verilmedikçe kapalı kalır; her birine bir `undo` ver. Bkz.
 [adım yazmak](references/writing-steps.md) kural 19–21.
+
+Geliştirici planı değişiklikle birlikte yazar ve test sunucusunu bir ortam olarak ekler; testçi aynı dosyayı orada
+koşar. Testçinin ihtiyacı olanlar için bkz. [testçi kılavuzu](docs/testers.tr.md): kurulum, test sunucusunda koşu,
+rapor, iş kaydından plan.
+
+## Plan klasörü: suite
+
+`run` bir klasör de alır ve içindeki her planı art arda koşar; hepsinin üstüne tek rapor yazar:
+
+```bash
+node ~/guided-smoke/engine/run.js run smoke/ --env test
+```
+
+- Planlar, klasördeki `<ad>.steps.js` dosyaları ve alt klasörlerin `steps.js`'idir; adlarının sırasıyla koşulurlar
+  (`01-sign-in`, `02-orders`; ortak bir `envs.js` plan değildir). Hepsi tarayıcı açılmadan denetlenir: koşulamayan
+  bir plan suite'in başlamasını engeller ve her sorun adıyla yazılır.
+- Her plan kendi raporu olan ayrı bir koşudur. İki plan arasında kapanış ekranı sıradakinin adını verir; **▶ Sonraki
+  plan** ve **■ Suite'i durdur** sunar. Bir adımdaki **■ Durdur** suite'i bitirir; hatayla biten plan yalnız kendisi
+  biter, sıradaki koşulur.
+- Test veritabanı hesabı bütün suite için bir kez yazılır, suite bitince unutulur.
+- Suite'in raporu koşuların yanında, `suites/` altında durur: plan başına bir satır, nerede durdurulduğu, koşulmayan
+  planlar, her ✖ notuyla, ve yapıştırılacak bir blok.
 
 ## Geliştirme
 

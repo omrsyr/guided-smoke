@@ -39,6 +39,9 @@ checklist, clicking through it alone, or watching a script race past.
 - Every answer is saved at once. The **report** lists what passed and what differed, the steps with browser errors,
   the measured walk time, what changed since each step was last walked, and a block to paste into your work item.
 - After a fix, `run 6655 --retry-failed` runs only the steps marked ✖.
+- A folder of plans is walked as a **suite**: one plan after another, on your machine or a shared test server, with
+  one report over them all. A tester walks the plans the developer keeps in the repository; see
+  [a tester's guide](docs/testers.md).
 
 ## Requirements
 
@@ -101,6 +104,7 @@ Say "run a smoke for this" or type:
 /guided-smoke plan 6655           plan only (no browser)
 /guided-smoke run 6655            run it (a new walk: 6655-machine-expiry-1, -2, …)
 /guided-smoke run 6655 --retry-failed
+/guided-smoke run smoke/ --env test   every plan of a folder, one after another (a suite)
 /guided-smoke report 6655         report of the latest walk (6655-2 for walk 2)
 /guided-smoke list
 ```
@@ -118,7 +122,8 @@ See [SKILL.md](SKILL.md).
 - **You sign in.** The script never sees a password; the browser's password saving is off in the smoke profile. A
   site with Windows sign-in gets your Windows account from the browser (`signIn: 'windows'` allows it for that host
   only). A plan with a test database asks for its account in a tab of its own before the sign-in; the engine keeps it
-  in memory for the walk, hands it to `sqlcmd` through its environment, and never writes it down.
+  in memory for the walk (for a suite of plans: until the last one has run), hands it to `sqlcmd` through its
+  environment, and never writes it down.
 - Changes a step makes outside the page (a database row, a job) happen only after you allow them, and a step with an
   `undo` puts its change back when the walk ends, also after ■ Stop. The report says what was put back and what not.
 - The smoke uses its **own browser profile** per project and browser, so your everyday browser is untouched and you
@@ -197,6 +202,28 @@ node ~/guided-smoke/engine/run.js run smoke/6655-machine-expiry.steps.js --env t
 The report names the environment and the build, and compares a walk only with earlier walks on the same server.
 Permitted steps stay off on a remote address unless `--allow-remote-writes` is given; give each an `undo`. See
 [writing steps](references/writing-steps.md) rules 19–21.
+
+The developer writes the plan with the change and adds the test server as an environment; the tester walks the same
+file there. [A tester's guide](docs/testers.md) has what the tester needs: the install, a walk on the test server,
+the report, a plan from a work item.
+
+## A folder of plans: a suite
+
+`run` also takes a folder and walks every plan in it, one after another, with one report over them all:
+
+```bash
+node ~/guided-smoke/engine/run.js run smoke/ --env test
+```
+
+- The plans are the folder's `<name>.steps.js` files and the `steps.js` of its folders, in the order of their names
+  (`01-sign-in`, `02-orders`; a shared `envs.js` is not a plan). All of them are checked before a browser opens: one
+  that cannot be walked keeps the suite from starting, and each problem is named.
+- Each plan is a walk of its own, with its own report. Between two plans the closing screen names the next one and
+  offers **▶ Next plan** and **■ Stop the suite**. **■ Stop** in a step ends the suite; a plan that ends with an
+  error ends alone, and the next one is walked.
+- A test database account is typed once for the whole suite and forgotten when it ends.
+- The suite's report sits next to the walks, under `suites/`: a row per plan, where it was stopped, the plans not
+  walked, every ✖ with its note, and a block to paste.
 
 ## Development
 
