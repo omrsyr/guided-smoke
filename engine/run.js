@@ -27,7 +27,7 @@ const { checkEnvs, pickEnv } = require('./envs');
 const PLAYWRIGHT_VERSION = '1.63.0';
 // The floor of that playwright-core: below it, loading it ends the process with its own message.
 const MIN_NODE = 20;
-const VERSION = '1.4.2';
+const VERSION = '1.5.0';
 
 const EXIT = { ok: 0, error: 1, usage: 2, runtime: 3, resolve: 4 };
 // How far back a report looks for the walk in which a step was last answered.

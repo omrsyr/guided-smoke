@@ -15,7 +15,7 @@ compatibility: >
   test database.
 metadata:
   author: omrsyr
-  version: "1.4.2"
+  version: "1.5.0"
 ---
 
 # guided-smoke

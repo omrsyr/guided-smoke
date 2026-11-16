@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 — 2026-11-16
 
 - **Environments: one plan walks on this machine and on a shared test server.** A plan's `envs` names other
   environments (`envs: { test: { base: 'https://test01/App', start: '/orders/2001', data: { order: 2001 } } }`), and
