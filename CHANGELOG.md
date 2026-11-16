@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.2 — 2026-11-16
 
 - **A `base` with an application path keeps it.** Under an IIS application (`https://test01/App`) the plan's paths
   went to the server's root: `goto('/orders')` opened `https://test01/orders`, and the start page `/` opened the
