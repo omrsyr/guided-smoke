@@ -1140,9 +1140,19 @@ test('browser errors reach the panel as they arrive and hold --auto; the sign-in
     ignoreErrors: ['GET /known-noise → 404'],
     steps: [
       { title: 'Clean', did: 'x', expect: ['x'], run: async () => {}, check: ok },
-      // Its call fails only once the panel is up and its countdown runs: the harness makes it then (see onPanel). A
-      // timer in the page raced the countdown on a slow machine and could land in the next step.
-      { title: 'Late', did: 'x', expect: ['x'], run: async () => {}, check: ok },
+      // Its call fails only once the panel is up and its countdown runs: the page makes it the moment the countdown is
+      // drawn. A timer in the page raced the countdown on a slow machine and could land in the next step; the harness,
+      // looking at the panel every 150 ms, could miss the whole 3 s countdown on a busy macOS runner.
+      { title: 'Late', did: 'x', expect: ['x'], check: ok, run: async ({ page }) => {
+        await page.evaluate(() => {
+          const late = new MutationObserver(() => {
+            if (!document.querySelector('#__guided_smoke [data-guided-smoke-countdown]')) return;
+            late.disconnect();
+            window.__lateCall = fetch('/api/tips').then(() => 'made', () => 'failed');
+          });
+          late.observe(document.documentElement, { childList: true, subtree: true });
+        });
+      } },
       { title: 'Ignored', did: 'x', expect: ['x'], run: async ({ page }) => { await page.evaluate(() => fetch('/known-noise?user=a@b.test')); }, check: ok },
       { title: 'Boxed', did: 'x', expect: ['x'], run: async ({ page, secretBox }) => {
         await secretBox({ fields: [{ name: 'token', label: 'Token' }] });
@@ -1161,10 +1171,11 @@ test('browser errors reach the panel as they arrive and hold --auto; the sign-in
         const p = await readPanel(page);
         if (!p) return;
         shown[p.title] = p.errors;
-        if (p.title === 'Late' && p.counting && !lateCall) lateCall = page.evaluate(() => fetch('/api/tips').then(() => 'made')).catch(() => 'failed');
+        // Read in the next step, on the same page (no step reloads it): by then the call has been answered.
+        if (p.title === 'Ignored' && lateCall === null) lateCall = await page.evaluate(() => window.__lateCall || 'not made').catch(() => null);
       },
     });
-    assert.strictEqual(await lateCall, 'made', 'the late call was made while the countdown ran');
+    assert.strictEqual(lateCall, 'made', 'the late call was made while the countdown ran');
     const events = readEvents(walkDir);
     assert.deepStrictEqual(events.map(e => [e.title, e.answeredBy || 'user']), [['Clean', 'auto'], ['Late', 'user'], ['Ignored', 'auto'], ['Boxed', 'user']]);
     assert.strictEqual(events[0].browserErrors, undefined, JSON.stringify(events[0].browserErrors));

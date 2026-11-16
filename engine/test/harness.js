@@ -77,11 +77,14 @@ async function autoWalk(o) {
       if (stopHere) {
         await page.locator('#__guided_smoke [data-guided-smoke-answer="stop"]').click({ timeout: 2000 });
       } else if (!waiting && await answer.count()) {
+        // Whether the countdown runs is taken before the panel is read: a countdown that has stopped (an error came in)
+        // never starts again, so what onPanel reads then is what the panel shows when it is answered. Taken after, an
+        // error arriving in between would be answered without onPanel ever seeing it.
+        const counting = o.letAuto && await page.locator('#__guided_smoke [data-guided-smoke-countdown]').count();
         if (o.onPanel) {
           const panel = page.locator('#__guided_smoke');
           await o.onPanel(page, { header: await panel.locator('span').first().textContent(), title: await panel.locator(':scope > div').nth(1).textContent() });
         }
-        const counting = o.letAuto && await page.locator('#__guided_smoke [data-guided-smoke-countdown]').count();
         if (!counting) {
           // A minimized panel is opened first, as a user would.
           if (!(await answer.isVisible())) await page.locator('#__guided_smoke [data-guided-smoke-min]').click({ timeout: 2000 });
