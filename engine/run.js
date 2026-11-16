@@ -468,7 +468,7 @@ async function runWalk({ project, planId, planPath, flags, sourceWalk = null }) 
         lang: pickLanguage(flags.lang || plan.lang), keepDownloads: !!flags['keep-downloads'],
         auto: !!flags.auto, trace: !!flags.trace, video: !!flags.video, panel,
         network: flags.network ? compileConfig(plan.network) : null, probe: !!flags.probe,
-        env: env.name, start: env.start, data: env.data, db: env.db, signIn: env.signIn,
+        env: env.name, start: env.start, data: env.data, db: env.db, signIn: env.signIn, login: env.login,
       },
     });
   } catch (e) {

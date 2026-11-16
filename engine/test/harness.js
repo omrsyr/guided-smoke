@@ -21,8 +21,8 @@ const { walk } = require('../engine');
  *                               while a countdown runs)
  * @param {boolean} [o.letAuto]  leave a panel alone while its --auto countdown runs
  * @param {string} [o.stopAt]    press Stop on the panel with this title instead of answering it
- * @param {Array} [o.db]         answers for the engine's database tab, in order: { user, password } (Connect; without
- *                               them, Try again), 'skip' or 'stop'
+ * @param {Array} [o.db]         answers for the engine's database tab, in order: the fields to type ({ server,
+ *                               database, user, password }, any of them) then Connect, or 'skip' or 'stop'
  * @param {string[]} [o.dbErrors] receives the tab's error line as it was before each answer
  * @param {string[][]} [o.launched] receives the browser's command-line switches the walk asked for
  * @param {object} [o.options]   more walk options (auto, trace, video, panel)
@@ -51,8 +51,7 @@ async function autoWalk(o) {
         if (o.dbErrors) o.dbErrors.push(await form.locator('[data-guided-smoke-db-error]').textContent());
         const next = dbAnswers.shift();
         if (typeof next === 'object') {
-          if (next.user != null) await form.locator('[data-guided-smoke-db="user"]').fill(next.user);
-          if (next.password != null) await form.locator('[data-guided-smoke-db="password"]').fill(next.password);
+          for (const [name, value] of Object.entries(next)) await form.locator(`[data-guided-smoke-db="${name}"]`).fill(value);
         }
         await form.locator(`[data-guided-smoke-db-answer="${typeof next === 'object' ? 'connect' : next}"]`).click({ timeout: 2000 });
       }

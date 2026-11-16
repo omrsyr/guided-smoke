@@ -19,7 +19,7 @@ module.exports = {
   db: { server: 'localhost', database: 'Orders', login: 'windows' },   // optional: the test database for sql() (rule 20)
   envs: {                           // optional: other environments, picked with --env (rule 19)
     test: { base: 'https://test01.corp.example/Orders', start: '/orders/2001', data: { order: 2001 },
-      signIn: 'windows', db: { server: 'sqltest01', database: 'OrdersTest', login: 'sql' } },
+      signIn: 'windows', login: '/Account/', db: { server: 'sqltest01', database: 'OrdersTest', login: 'sql' } },
   },
   appVersion: async ({ page, text }) => text(page.locator('#app-version')),   // optional: read once after the sign-in (rule 21)
   steps: [ /* … */ ],
@@ -151,9 +151,10 @@ For an API that needs the user's account, the project's database tool, or a back
     where that comes from. Put probe steps after the happy path, end with a probe clean-up step, and see
     [probing](probing.md) for the catalog, the expectations and what a try leads to.
 19. **Environments (`envs`, `--env`).** One plan walks on this machine and on a shared test server. The plan's own
-    `base`, `start` and `data` are its default environment; `envs` names others, each overriding what it gives (an
-    environment without `base` keeps the plan's, its `data` is laid over the plan's key by key). `--env test` picks
-    one; `--base` still overrides the address. Steps take record ids from `data` (`goto(`/orders/${data.order}`)`),
+    `base`, `start`, `data`, `login`, `db` and `signIn` are its default environment; `envs` names others, each
+    overriding what it gives (an environment without `base` keeps the plan's, its `data` is laid over the plan's key
+    by key). `login` belongs there too: one server signs in through an identity provider of its own, another through
+    its own `/Account/` pages. `--env test` picks one; `--base` still overrides the address. Steps take record ids from `data` (`goto(`/orders/${data.order}`)`),
     never from constants, since a test server's records are not the developer machine's. Several plans share their
     environments with a module of their own: `envs: require('../envs')`. The walk records the environment's name; its
     report names it and compares only with earlier walks in the same environment, and `--retry-failed` reruns the ✖
@@ -167,7 +168,9 @@ For an API that needs the user's account, the project's database tool, or a back
 20. **The test database (`db`, `sql()`, `db: true`).** A plan or environment with `db: { server, database, login }`
     (SQL Server, through `sqlcmd`) gets `sql(query)` in its steps and undos. With `login: 'sql'` (the default) the
     engine opens a tab of its own before the sign-in, shows the server and the database, and the **user** types an
-    account there; the engine tries it at once and asks again when it is refused. The account stays in the engine's
+    account there; the engine tries it at once and asks again when it is refused. A server or database the plan
+    leaves out (`db: { login: 'sql' }`) is typed there too: the tester often knows the test server better than the
+    plan's author. What the plan gives is shown, not editable. The account stays in the engine's
     memory for the walk and reaches sqlcmd in its environment only. With `login: 'windows'` the user's Windows account
     is used and the tab opens only when it fails. **Continue without the database** skips every step marked `db: true`
     ("no database", following its `skipTo` as a declined step does); `sql()` elsewhere then throws. Mark every step
@@ -175,9 +178,10 @@ For an API that needs the user's account, the project's database tool, or a back
 
     `sql()` returns `rows` (arrays of text, `NULL` as written), `affected` (the last "rows affected" count) and `value`
     (the first column of the first row). A failure says only its kind (the account, the database, the network, sqlcmd
-    missing, a query): sqlcmd's message may hold data and is never shown. Write fixed query text with ids from `data`
-    or `state`, select only counts and states, and put no row into `did`, `expect`, a check text or `log`. A write is
-    a permitted step with an `undo` (rule 9). See [patterns](patterns.md#reading-and-writing-the-database).
+    missing, no permission, a query): sqlcmd's message may hold data and is never shown. Write fixed query text with
+    ids from `data` or `state`, select only counts and states, and put no row into `did`, `expect`, a check text or
+    `log`. A write is a permitted step with an `undo` (rule 9); on a shared server, ask for an account that may write
+    where the undo writes, or the change stays. See [patterns](patterns.md#reading-and-writing-the-database).
 21. **The application's version (`appVersion`).** On a shared test server, say which build was walked: the plan's
     `appVersion(ctx)` runs once after the sign-in and returns a short text (a footer, an about page, a version API
     through `inPage`). The report's header and the first line of the paste block carry it, cut to 40 characters. If

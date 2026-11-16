@@ -4,8 +4,8 @@
 
 - **Environments: one plan walks on this machine and on a shared test server.** A plan's `envs` names other
   environments (`envs: { test: { base: 'https://test01/App', start: '/orders/2001', data: { order: 2001 } } }`), and
-  `--env test` picks one. The plan's own `base`, `start` and `data` are its default environment; an environment
-  overrides what it gives, and its `data` is laid over the plan's key by key. Steps read the test records as
+  `--env test` picks one. The plan's own `base`, `start`, `data` and `login` (the sign-in pages' addresses) are its
+  default environment; an environment overrides what it gives, and its `data` is laid over the plan's key by key. Steps read the test records as
   `ctx.data`. A mistake in `envs` (an unknown key, a `base` that is no URL) and an unknown `--env` are refused before
   the browser opens, naming what exists.
   - The walk records the environment: the report names it, its paste block reads "Smoke on test (…)", and `list`
@@ -25,16 +25,21 @@
   through `sqlcmd`) gets `sql(query)` in its steps and undos: `{ rows, affected, value }`.
   - With `login: 'sql'` the engine opens a tab of its own before the sign-in (`about:blank`: no page of the
     application can reach it). It shows the server and the database; the user types an account, which is tried at
-    once and asked again when refused, with the reason. With `login: 'windows'` the Windows account is used, and the
+    once and asked again when refused, with the reason. A server or database the plan leaves out is typed there too;
+    what the plan gives cannot be changed there. With `login: 'windows'` the Windows account is used, and the
     tab opens only when it fails.
   - The account stays in the engine's memory for the walk and reaches sqlcmd as `SQLCMDUSER` / `SQLCMDPASSWORD` in its
     environment only; never an argument, a file, a record or a trace. With `--video` that tab's recording is deleted.
   - **Continue without the database** skips the steps marked `db: true` ("no database"); `sql()` elsewhere then says
     the walk has none. The report says whether the walk had its database.
   - sqlcmd's messages are never shown: a failure says only its kind (the account, the database, the network, sqlcmd
-    missing, a timeout, a query). The query and the output go through files that are removed at once, so Turkish
+    missing, a timeout, no permission (a read-only account that tried to write), a query). The query and the output go through files that are removed at once, so Turkish
     letters come back as written (on the console, sqlcmd's first run in a process turns them into plain ones).
+  - sqlcmd runs with `QUOTED_IDENTIFIER ON` (`-I`), as applications do: with sqlcmd's own default SQL Server refuses
+    to write to a table with a filtered index or an indexed view (the field walk's undo failed so).
   - `doctor` names sqlcmd's version. `GUIDED_SMOKE_SQLCMD` points to another sqlcmd.
+- A note typed into the panel with tabs or line breaks (a row pasted from the table) reads as one line in the report
+  and its paste block.
 - **Windows sign-in: `signIn: 'windows'`.** Chrome and Edge send the Windows account by themselves to `localhost` and
   a bare machine name, but not to a full name (`test01.corp.example`): there an IIS site with Windows authentication
   failed at once, with no dialog, and the walk waited for a sign-in that could not come. With `signIn: 'windows'` in
@@ -44,8 +49,10 @@
 - **`doctor --base <url>`: what the browser meets at an address**, before a walk on a test server. A headless browser
   with a throw-away profile opens it once and says whether and how fast it answers (with a hint for a name that does
   not resolve, a closed port or no answer), the certificate (one this machine does not trust is fine for a walk),
-  a Windows sign-in (and whether `signIn: 'windows'` makes it work), a redirect to a sign-in page, and the server's
-  name. An address that gives no answer ends `doctor` with exit code 1.
+  a Windows sign-in (and whether `signIn: 'windows'` makes it work), a redirect to a sign-in page (also one a
+  single-page application makes by script after the load: the address is read once it has stayed the same for
+  1.5 s), and the server's name. The final address is shown without its query, which on a sign-in page carries
+  one-time values. An address that gives no answer ends `doctor` with exit code 1.
 - **`appVersion`: the build walked.** The plan's `appVersion(ctx)` runs once after the sign-in; the report's header
   and the paste block's first line carry its text, cut to 40 characters. A plan that opens another page for it gets
   the start page back before step 1; a failure is recorded as "not read" and the walk goes on.

@@ -8,6 +8,9 @@ const os = require('os');
 const path = require('path');
 const { DEFAULT_LOGIN } = require('./engine');
 
+const SETTLE_MS = 1500;
+const SETTLE_MAX_MS = 8000;
+
 const HINTS = {
   ERR_NAME_NOT_RESOLVED: 'the name does not resolve (a typo, DNS, or a VPN not connected)',
   ERR_CONNECTION_REFUSED: 'nothing listens there (the port, or the site is stopped)',
@@ -40,12 +43,23 @@ async function open(playwright, browser, url, { trustAll = false, allowWindows =
   let out;
   try {
     const resp = await page.goto(url, { timeout: 20000, waitUntil: 'load' });
-    out = { status: resp ? resp.status() : null, final: page.url() };
+    out = { status: resp ? resp.status() : null, ms: Date.now() - started };
+    // A single-page application sends the browser on to its sign-in page by script, after the load (often from a
+    // timer, so the network can look quiet before it): the final address is read once it has stayed the same for
+    // SETTLE_MS, waiting at most SETTLE_MAX_MS.
+    let at = page.url();
+    let since = Date.now();
+    for (const end = Date.now() + SETTLE_MAX_MS; Date.now() < end && Date.now() - since < SETTLE_MS;) {
+      await page.waitForTimeout(250);
+      if (page.url() !== at) { at = page.url(); since = Date.now(); }
+    }
+    await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {});
+    out.final = page.url();
   } catch (e) {
     const m = /net::(ERR_[A-Z_]+)/.exec(String(e && e.message));
     out = { error: m ? m[1] : String((e && e.message) || e).split('\n')[0].slice(0, 160) };
   }
-  out.ms = Date.now() - started;
+  if (out.ms == null) out.ms = Date.now() - started;
   await context.close().catch(() => {});
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* the system's temp folder */ }
   return { ...out, schemes: [...schemes], server };
@@ -86,8 +100,10 @@ async function checkSite({ playwright, browser, base }) {
   const signInPage = !r.error && DEFAULT_LOGIN.test(new URL(r.final).pathname + new URL(r.final).search)
     ? 'the address leads to a sign-in page: the user signs in at the start of the walk' : null;
   if (r.error && !isWindows(r)) next.push('the walk cannot start here: fix the address or the network first');
+  // The query of a sign-in address carries one-time values (state, nonce, a code challenge): only its presence is shown.
+  const final = r.final ? (() => { const u = new URL(r.final); return `${u.origin}${u.pathname}${u.search ? '?…' : ''}`; })() : null;
   return {
-    answer: answerText(r), final: r.final || null, certificate, auth, signInPage, server: r.server || 'not named',
+    answer: answerText(r), final, certificate, auth, signInPage, server: r.server || 'not named',
     next: next.length ? next.join('; ') : null, ok: !r.error,
   };
 }

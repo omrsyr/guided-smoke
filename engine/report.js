@@ -105,6 +105,9 @@ function finalStates(events) {
   return states;
 }
 
+// A note typed into the panel may hold tabs and line breaks (a row pasted from a table): it reads as one line.
+const oneLine = text => String(text ?? '').replace(/\s+/g, ' ').trim();
+
 function cell(value) {
   return String(value ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim();
 }
@@ -224,7 +227,7 @@ function build(meta, events, prev) {
     }
     const auto = e && e.auto ? `${e.auto.ok ? '✔' : '✖'} ${e.auto.text}` : '';
     const browser = e && errors.total(e.browserErrors) ? `⚠ ${t.errIn}${errors.countsText(e.browserErrors, t)}` : null;
-    const note = e ? [e.answer === 'pass' && e.againstCheck ? `⚠ ${L.against}` : null, e.note, e.error, ...(e.warnings || []), browser, networkNote(e), probeNote(e)].filter(Boolean).join(' · ') : '';
+    const note = e ? [e.answer === 'pass' && e.againstCheck ? `⚠ ${L.against}` : null, oneLine(e.note), e.error, ...(e.warnings || []), browser, networkNote(e), probeNote(e)].filter(Boolean).join(' · ') : '';
     const shot = e && e.screenshot ? `[${e.screenshot}](${e.screenshot})` : '';
     lines.push(`| ${n} | ${cell(title)} | ${cell(outcome)} | ${cell(auto)} | ${cell(note)} | ${shot} |`);
   }
@@ -269,7 +272,7 @@ function build(meta, events, prev) {
     const browser = errors.total(e.browserErrors);
     const net = networkNote(e);
     const tried = e.probe && e.probe.tries ? L.pasteProbe.replace('{ok}', e.probe.tries - e.probe.different).replace('{tries}', e.probe.tries) : null;
-    lines.push(`${ICON[e.answer]} ${e.title}${e.answeredBy === 'auto' ? ` (${L.byAuto})` : ''}${e.answer === 'pass' && e.againstCheck ? ` (⚠ ${L.againstShort})` : ''}${browser ? ` (⚠ ${plural(browser, L.pasteErrors)})` : ''}${net ? ` (${net})` : ''}${tried ? ` (${tried})` : ''}${e.note ? ` — ${e.note}` : ''}`);
+    lines.push(`${ICON[e.answer]} ${e.title}${e.answeredBy === 'auto' ? ` (${L.byAuto})` : ''}${e.answer === 'pass' && e.againstCheck ? ` (⚠ ${L.againstShort})` : ''}${browser ? ` (⚠ ${plural(browser, L.pasteErrors)})` : ''}${net ? ` (${net})` : ''}${tried ? ` (${tried})` : ''}${e.note ? ` — ${oneLine(e.note)}` : ''}`);
     // Of a probe only the rows that differ go to the work item, each with what the application said.
     for (const r of tried ? e.probe.rows.filter(x => !x.ok) : []) {
       const row = L.pasteRow.replace('{value}', r.value).replace('{expect}', probing.expectText(r, t)).replace('{got}', probing.gotText(r, t));

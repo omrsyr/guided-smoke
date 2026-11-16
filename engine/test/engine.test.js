@@ -102,10 +102,10 @@ test('environments: the plan is its own, envs override base, start and data, and
   const plan = { base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' },
     envs: { test: { base: 'https://test01/App', data: { order: 2001 } }, uat: { start: '/home' } } };
   assert.strictEqual(checkEnvs(plan), null);
-  assert.deepStrictEqual(pickEnv(plan, undefined), { name: null, base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' }, db: null, signIn: null });
-  assert.deepStrictEqual(pickEnv(plan, 'test'), { name: 'test', base: 'https://test01/App', start: '/orders/1001', data: { order: 2001, user: 'smoke' }, db: null, signIn: null });
-  assert.deepStrictEqual(pickEnv(plan, 'uat'), { name: 'uat', base: 'https://localhost:5001', start: '/home', data: { order: 1001, user: 'smoke' }, db: null, signIn: null });
-  assert.deepStrictEqual(pickEnv({ steps: [] }, undefined), { name: null, base: null, start: '/', data: {}, db: null, signIn: null });
+  assert.deepStrictEqual(pickEnv(plan, undefined), { name: null, base: 'https://localhost:5001', start: '/orders/1001', data: { order: 1001, user: 'smoke' }, db: null, signIn: null, login: null });
+  assert.deepStrictEqual(pickEnv(plan, 'test'), { name: 'test', base: 'https://test01/App', start: '/orders/1001', data: { order: 2001, user: 'smoke' }, db: null, signIn: null, login: null });
+  assert.deepStrictEqual(pickEnv(plan, 'uat'), { name: 'uat', base: 'https://localhost:5001', start: '/home', data: { order: 1001, user: 'smoke' }, db: null, signIn: null, login: null });
+  assert.deepStrictEqual(pickEnv({ steps: [] }, undefined), { name: null, base: null, start: '/', data: {}, db: null, signIn: null, login: null });
   // An environment's db replaces the plan's whole: a test server's database is another one.
   const withDb = { db: { server: 'localhost', database: 'App' }, envs: { test: { db: { server: 'sql01', database: 'AppTest', login: 'windows' } }, uat: {} } };
   assert.deepStrictEqual(pickEnv(withDb, 'test').db, { server: 'sql01', database: 'AppTest', login: 'windows' });
@@ -115,15 +115,22 @@ test('environments: the plan is its own, envs override base, start and data, and
   for (const [bad, msg] of [
     [{ envs: {} }, /at least one environment/],
     [{ envs: { test: { base: 'test01' } } }, /envs\.test: base "test01" is not a URL/],
-    [{ envs: { test: { url: 'https://x' } } }, /envs\.test has an unknown key "url"\. An environment knows: base, start, data, db, signIn\./],
+    [{ envs: { test: { url: 'https://x' } } }, /envs\.test has an unknown key "url"\. An environment knows: base, start, data, db, signIn, login\./],
     [{ envs: { test: { signIn: 'kerberos' } } }, /envs\.test: signIn takes 'windows'/],
-    [{ envs: { test: { db: { server: 'sql01' } } } }, /envs\.test: db must be \{ server: 'sql01', database: 'AppTest', login: 'sql' \| 'windows' \}/],
+    [{ envs: { test: { login: '/Account/(' } } }, /envs\.test: login "\/Account\/\(" is not a regular expression/],
+    [{ envs: { test: { db: { server: ' ' } } } }, /envs\.test: db must be \{ server: 'sql01', database: 'AppTest', login: 'sql' \| 'windows' \}/],
     [{ db: { server: 'sql01', database: 'AppTest', login: 'kerberos' } }, /the plan: db must be/],
     [{ db: { server: 'sql01', database: 'AppTest', password: 'x' } }, /the plan: db must be/],
     [{ envs: { test: { data: [1] } } }, /envs\.test: data must be an object/],
     [{ envs: { 'te st': {} } }, /not a usable name/],
     [{ data: 'x' }, /the plan: data must be an object/],
   ]) assert.match(String(checkEnvs(bad)), msg);
+  // The sign-in pages differ per server (an identity provider of its own here, the site's /Account/ pages there).
+  const sites = { login: '^https://localhost:7269/', envs: { test: { base: 'https://test01', login: '/Account/' }, uat: { base: 'https://uat01' } } };
+  assert.deepStrictEqual([pickEnv(sites).login, pickEnv(sites, 'test').login, pickEnv(sites, 'uat').login], ['^https://localhost:7269/', '/Account/', '^https://localhost:7269/']);
+  // A server or a database left out is asked for in the database tab.
+  assert.strictEqual(checkEnvs({ envs: { test: { db: { login: 'sql' } } } }), null);
+  assert.strictEqual(checkEnvs({ db: { server: 'test01' } }), null);
 });
 
 test('--env is checked before a browser opens: an unknown environment, one without an address, a mistake in envs', () => {
@@ -220,6 +227,8 @@ test('sqlcmd\'s output reads as rows, the count of affected rows and the first v
     ['Sqlcmd: Error: Microsoft ODBC Driver 18 for SQL Server : TCP Provider: No such host is known.', 'network'],
     ['Sqlcmd: Error: Microsoft ODBC Driver 18 for SQL Server : Login timeout expired.', 'network'],
     ["Msg 208, Level 16, State 1, Server sql01, Line 1\r\nInvalid object name 'x'.", 'query'],
+    ["Msg 229, Level 14, State 5, Server sql01, Line 1\r\nThe UPDATE permission was denied on the object 'x', database 'y', schema 'dbo'.", 'permission'],
+    ['Msg 262, Level 14, State 1, Server sql01, Line 1\r\nCREATE TABLE permission denied in database \'y\'.', 'permission'],
   ]) assert.strictEqual(sqlDb.classify(text), kind, text);
   assert.strictEqual(sqlDb.classify('', { code: 'ENOENT' }), 'tool');
   assert.strictEqual(sqlDb.classify('', { killed: true }), 'timeout');
@@ -247,6 +256,7 @@ test('sql() hands the account to sqlcmd in its environment only, reads the query
       assert.strictEqual(first.args[first.args.indexOf(flag) + 1], value, flag);
     }
     assert.ok(first.args.includes('-C') && first.args.includes('-b'));
+    assert.ok(first.args.includes('-I'), 'QUOTED_IDENTIFIER ON: a table with a filtered index can be written to');
     assert.ok(!fs.existsSync(first.args[first.args.indexOf('-i') + 1]), 'the query file is removed');
     assert.ok(!fs.existsSync(first.args[first.args.indexOf('-o') + 1]), 'the output file is removed');
     // Turkish letters go in and come back as typed: both files are UTF-8.
@@ -284,6 +294,14 @@ test('doctor names sqlcmd; a step\'s db is true or false', async () => {
   const r = cli('run', id);
   assert.strictEqual(r.status, 2);
   assert.match(r.stderr, /step 1 db must be true or false/);
+});
+
+test('a note with tabs and line breaks (a row pasted from a table) reads as one line in the table and the paste block', () => {
+  const meta = { totalSteps: 1, titles: ['Probe'], lang: 'en', walkId: 'n-1', planId: 'n', readyAt: '2026-11-03T08:00:00Z',
+    result: 'completed', browser: 'chrome', browserSource: 'requested', base: 'https://test01' };
+  const { markdown } = report.build(meta, [{ n: 1, title: 'Probe', answer: 'diff', note: '14\tsmoke-p x\treddedilir ❓\t✔ kaydedildi    \n\nNoted.' }], null);
+  assert.match(markdown, /\| 1 \| Probe \| ✖ different \| {2}\| 14 smoke-p x reddedilir ❓ ✔ kaydedildi Noted\. \|/);
+  assert.match(markdown, /\n✖ Probe — 14 smoke-p x reddedilir ❓ ✔ kaydedildi Noted\.\n/);
 });
 
 test('the report says whether the walk had its database, and why a step that needs it was skipped', () => {

@@ -752,10 +752,10 @@ test('the test database: its own tab before the sign-in asks again after a refus
         check: async ({ state }) => [true, state.r] },
     ],
   };
-  const walkWith = async (db, options = {}) => {
+  const walkWith = async (db, options = {}, p = plan) => {
     const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
     const dbErrors = [];
-    const { meta } = await autoWalk({ playwright, plan, browser: chosen, base, lang: 'en', walkDir, db, dbErrors, options });
+    const { meta } = await autoWalk({ playwright, plan: p, browser: chosen, base, lang: 'en', walkDir, db, dbErrors, options });
     return { meta, events: fs.existsSync(path.join(walkDir, 'events.jsonl')) ? readEvents(walkDir) : [], dbErrors, walkDir };
   };
   try {
@@ -789,7 +789,14 @@ test('the test database: its own tab before the sign-in asks again after a refus
     const stopped = await walkWith(['stop']);
     assert.deepStrictEqual([stopped.meta.result, stopped.meta.error], ['stopped', 'stopped at the database form']);
     assert.deepStrictEqual(asked, []);
-    for (const w of [first, without, stopped]) fs.rmSync(w.walkDir, { recursive: true, force: true });
+
+    // A plan that leaves out the server and the database: the tab asks for them with the account.
+    const typed = await walkWith([{ server: 'sql01', database: 'AppTest', user: 'smoke-user', password }], {}, { ...plan, db: { login: 'sql' } });
+    assert.strictEqual(typed.meta.db, 'sql');
+    const last = fs.readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l)).pop();
+    assert.deepStrictEqual([last.args[last.args.indexOf('-S') + 1], last.args[last.args.indexOf('-d') + 1]], ['sql01', 'AppTest']);
+    assert.ok(typed.events.find(e => e.n === 1).auto.ok, 'sql() works on what was typed');
+    for (const w of [first, without, stopped, typed]) fs.rmSync(w.walkDir, { recursive: true, force: true });
   } finally {
     for (const [k, v] of Object.entries(before)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     await new Promise(resolve => app.close(resolve));
@@ -804,7 +811,10 @@ test('doctor --base says what the browser meets: the answer, a sign-in page, the
   const app = http.createServer((req, res) => {
     const app = req.url.startsWith('/app');
     res.writeHead(app ? 302 : 200, { 'Content-Type': 'text/html', Server: 'test-server/1.0', ...(app ? { Location: '/account/login?next=/app' } : {}) });
-    res.end('<!doctype html><title>t</title><h1>sign in</h1>');
+    // /spa: a single-page application that sends the browser to its sign-in page by script, after the load.
+    res.end(req.url === '/spa'
+      ? '<!doctype html><title>t</title><script>setTimeout(() => { location.href = "/Account/Login"; }, 600);</script>'
+      : '<!doctype html><title>t</title><h1>sign in</h1>');
   });
   const closed = http.createServer();
   for (const s of [app, closed]) await new Promise(resolve => s.listen(0, '127.0.0.1', resolve));
@@ -814,11 +824,14 @@ test('doctor --base says what the browser meets: the answer, a sign-in page, the
     const ok = await doctor(`http://127.0.0.1:${app.address().port}/app`);
     assert.strictEqual(ok.code, 0, ok.stderr);
     assert.match(ok.site, /^ {2}answer: 200 in \d+ ms$/m);
-    assert.match(ok.site, /^ {2}final: http:\/\/127\.0\.0\.1:\d+\/account\/login\?next=\/app$/m);
+    assert.match(ok.site, /^ {2}final: http:\/\/127\.0\.0\.1:\d+\/account\/login\?…$/m, 'the query (one-time values on a sign-in page) is left out');
     assert.match(ok.site, /^ {2}certificate: none \(http\)$/m);
     assert.match(ok.site, /^ {2}auth: none seen$/m);
     assert.match(ok.site, /^ {2}signInPage: the address leads to a sign-in page/m);
     assert.match(ok.site, /^ {2}server: test-server\/1\.0$/m);
+    const spa = await doctor(`http://127.0.0.1:${app.address().port}/spa`);
+    assert.match(spa.site, /^ {2}final: http:\/\/127\.0\.0\.1:\d+\/Account\/Login$/m, 'the redirect by script is waited for');
+    assert.match(spa.site, /^ {2}signInPage: the address leads to a sign-in page/m);
     const none = await doctor(`http://127.0.0.1:${closedPort}/`);
     assert.strictEqual(none.code, 1);
     assert.match(none.site, /answer: no answer: ERR_CONNECTION_REFUSED — nothing listens there/);

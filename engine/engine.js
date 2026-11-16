@@ -346,10 +346,11 @@ function drawBox(s) {
 }
 
 // Runs in the engine's own tab (about:blank: no page of the application can reach it). Draws the database form: the
-// server and the database as text, the user's account as inputs (none with a Windows sign-in), and Connect, Continue
-// without and Stop. What is typed goes to the engine only through this tab's own binding; the tab is closed once
-// answered. s.error shows why the last try failed; window.__guidedSmokeDbError(text) shows a new one without redrawing,
-// so what was typed stays. The form carries data-ready while its buttons can be pressed.
+// server and the database as text when the plan gives them, as inputs when it leaves them out; the user's account as
+// inputs (none with a Windows sign-in); and Connect, Continue without and Stop. What is typed goes to the engine only
+// through this tab's own binding; the tab is closed once answered. s.error shows why the last try failed;
+// window.__guidedSmokeDbError(text) shows a new one without redrawing, so what was typed stays. The form carries
+// data-ready while its buttons can be pressed.
 function drawDbForm(s) {
   document.title = s.title;
   document.body.textContent = '';
@@ -367,10 +368,12 @@ function drawDbForm(s) {
   box.id = '__guided_smoke_db';
   box.appendChild(el('div', s.title, { fontWeight: '600', fontSize: '18px', marginBottom: '6px' }));
   box.appendChild(el('div', s.intro));
-  const facts = el('div', null, { margin: '12px 0', padding: '8px 10px', background: '#f8f9fa', borderRadius: '6px', fontFamily: 'Consolas, monospace', fontSize: '13px' });
-  facts.appendChild(el('div', `${s.serverLabel}: ${s.server}`));
-  facts.appendChild(el('div', `${s.databaseLabel}: ${s.database}`));
-  box.appendChild(facts);
+  const given = [[s.serverLabel, s.server], [s.databaseLabel, s.database]].filter(([, v]) => v);
+  if (given.length) {
+    const facts = el('div', null, { margin: '12px 0 4px', padding: '8px 10px', background: '#f8f9fa', borderRadius: '6px', fontFamily: 'Consolas, monospace', fontSize: '13px' });
+    given.forEach(([label, v]) => facts.appendChild(el('div', `${label}: ${v}`)));
+    box.appendChild(facts);
+  }
   const input = (label, name, secret) => {
     const l = el('label', label, { display: 'block', marginTop: '8px', fontSize: '13px' });
     const i = el('input', null, { display: 'block', width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '6px 8px', border: '1px solid #ced4da', borderRadius: '4px', font: 'inherit' });
@@ -382,8 +385,11 @@ function drawDbForm(s) {
     box.appendChild(l);
     return i;
   };
+  const server = s.server ? null : input(s.serverLabel, 'server', false);
+  const database = s.database ? null : input(s.databaseLabel, 'database', false);
   const user = s.windows ? null : input(s.userLabel, 'user', false);
   const password = s.windows ? null : input(s.passwordLabel, 'password', true);
+  const fields = [server, database, user, password].filter(Boolean);
   const error = el('div', s.error || '', { marginTop: '10px', color: '#dc3545', fontWeight: '600', minHeight: '1.5em' });
   error.setAttribute('data-guided-smoke-db-error', '');
   box.appendChild(error);
@@ -393,21 +399,23 @@ function drawDbForm(s) {
     buttons.forEach(b => { b.disabled = !on; b.style.opacity = on ? '1' : '.6'; });
     if (on) box.setAttribute('data-ready', ''); else box.removeAttribute('data-ready');
   };
-  const send = (action, ...values) => { ready(false); window.__guidedSmokeDb(action, ...values); };
+  const send = (action, values) => { ready(false); window.__guidedSmokeDb(action, values || {}); };
   [['connect', s.connect, '#198754'], ['skip', s.skip, '#fd7e14'], ['stop', s.stop, '#6c757d']].forEach(([action, label, color]) => {
     const b = el('button', label, { background: color, color: '#fff', border: '0', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer', font: 'inherit', fontWeight: '600' });
     b.setAttribute('data-guided-smoke-db-answer', action);
     b.onclick = () => {
       if (action !== 'connect') { send(action); return; }
-      if (user && (!user.value || !password.value)) { error.textContent = s.empty; return; }
+      if (fields.some(f => !f.value.trim())) { error.textContent = s.empty; return; }
       error.textContent = s.busy;
       error.style.color = '#0d6efd';
-      if (user) send('connect', user.value, password.value); else send('connect');
+      const values = {};
+      fields.forEach(f => { values[f.getAttribute('data-guided-smoke-db')] = f.value; });
+      send('connect', values);
     };
     buttons.push(b);
     bar.appendChild(b);
   });
-  if (password) password.onkeydown = e => { if (e.key === 'Enter') buttons[0].click(); };
+  fields.forEach(f => { f.onkeydown = e => { if (e.key === 'Enter') buttons[0].click(); }; });
   box.appendChild(bar);
   box.appendChild(el('div', s.note, { marginTop: '10px', fontSize: '12px', color: '#6c757d' }));
   document.body.appendChild(box);
@@ -417,7 +425,7 @@ function drawDbForm(s) {
     ready(true);
   };
   ready(true);
-  if (user) user.focus();
+  if (fields.length) fields[0].focus();
 }
 
 // Runs in the page. Shows the step's browser errors and network view ({ errors, network }) in the drawn panel without
@@ -731,7 +739,7 @@ async function walk(o) {
       counts.probeTries += probe.tries;
       counts.probeDiff += probe.different;
     }
-    console.log(`[${event.n}] ${event.answer}${event.reason ? ' (' + event.reason + ')' : ''}${event.note ? ' — ' + event.note : ''}${browserErrors ? ` · browser errors: ${browserErrors}` : ''}${network ? ` · network findings: ${network}${event.network.critical ? ` (critical: ${event.network.critical})` : ''}` : ''}${probe ? ` · probe: ${probe.tries - probe.different}/${probe.tries} as expected` : ''}`);
+    console.log(`[${event.n}] ${event.answer}${event.reason ? ' (' + event.reason + ')' : ''}${event.note ? ' — ' + event.note.replace(/\s+/g, ' ').trim() : ''}${browserErrors ? ` · browser errors: ${browserErrors}` : ''}${network ? ` · network findings: ${network}${event.network.critical ? ` (critical: ${event.network.critical})` : ''}` : ''}${probe ? ` · probe: ${probe.tries - probe.different}/${probe.tries} as expected` : ''}`);
   };
 
   const profile = options.fresh ? fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-')) : o.profile;
@@ -1207,25 +1215,31 @@ async function walk(o) {
   // The account typed there lives only in `db` while the walk runs. sqlcmd's messages are never shown: a failure says
   // only its kind (the account, the database, the network, sqlcmd missing, a query).
   const dbConfig = options.db || plan.db || null;
-  const db = { account: null, ready: false };
+  // `config` is the plan's db with what the tab asked for filled in (a server or database the plan left out).
+  const db = { config: null, account: null, ready: false };
   if (dbConfig) meta.db = 'none';
   const sqlRun = async query => {
     if (!db.ready) throw new Error(dbConfig ? t.dbNone : t.dbNotSet);
     try {
-      return await runSql({ db: dbConfig, account: db.account, query });
+      return await runSql({ db: db.config, account: db.account, query });
     } catch (e) {
       throw new Error(format(t.dbFailed, { why: t.dbKinds[e.kind] || t.dbKinds.query }));
     }
   };
-  const tryDb = async account => {
-    try { await runSql({ db: dbConfig, account, query: 'SELECT 1' }); return null; } catch (e) { return e.kind || 'query'; }
+  const tryDb = async (config, account) => {
+    try { await runSql({ db: config, account, query: 'SELECT 1' }); return null; } catch (e) { return e.kind || 'query'; }
   };
-  /** Before the sign-in: connects, asking for an account in the engine's own tab; 'stop' when the user stops there. */
+  /**
+   * Before the sign-in: connects, asking in the engine's own tab for the account and for a server or database the
+   * plan left out; 'stop' when the user stops there.
+   */
   const connectDb = async () => {
     if (!dbConfig) return null;
     const windows = (dbConfig.login || 'sql') === 'windows';
-    let failed = windows ? await tryDb(null) : null;
-    if (windows && !failed) {
+    const complete = !!(dbConfig.server && dbConfig.database);
+    let failed = windows && complete ? await tryDb(dbConfig, null) : null;
+    if (windows && complete && !failed) {
+      db.config = dbConfig;
       db.ready = true;
       meta.db = 'windows';
       saveMeta();
@@ -1235,13 +1249,13 @@ async function walk(o) {
     const tabVideo = options.video ? tab.video() : null;
     let answer = null;
     const tabClosed = new Promise(resolve => tab.once('close', () => resolve({ a: 'skip' })));
-    await tab.exposeFunction('__guidedSmokeDb', (a, user, password) => {
-      if (answer) { const r = answer; answer = null; r({ a, user, password }); }
+    await tab.exposeFunction('__guidedSmokeDb', (a, values) => {
+      if (answer) { const r = answer; answer = null; r({ a, values: values || {} }); }
     });
     await tab.evaluate(drawDbForm, {
-      title: t.dbTitle, intro: windows ? t.dbIntroWindows : t.dbIntro, windows, serverLabel: t.dbServer, server: dbConfig.server,
-      databaseLabel: t.dbDatabase, database: dbConfig.database, userLabel: t.dbUser, passwordLabel: t.dbPassword,
-      connect: windows ? t.dbRetry : t.dbConnect, skip: t.dbSkip, stop: t.stop, note: t.dbNote, busy: t.dbBusy, empty: t.dbEmpty,
+      title: t.dbTitle, intro: windows ? t.dbIntroWindows : t.dbIntro, windows, serverLabel: t.dbServer, server: dbConfig.server || null,
+      databaseLabel: t.dbDatabase, database: dbConfig.database || null, userLabel: t.dbUser, passwordLabel: t.dbPassword,
+      connect: windows && complete ? t.dbRetry : t.dbConnect, skip: t.dbSkip, stop: t.stop, note: t.dbNote, busy: t.dbBusy, empty: t.dbEmpty,
       error: failed ? t.dbKinds[failed] : '',
     });
     let outcome = null;
@@ -1249,9 +1263,12 @@ async function walk(o) {
       const res = await Promise.race([new Promise(resolve => { answer = resolve; }), tabClosed]);
       if (closed || res.a === 'stop') { outcome = 'stop'; break; }
       if (res.a !== 'connect') break;
-      const account = windows ? null : { user: String(res.user || ''), password: String(res.password || '') };
-      failed = await tryDb(account);
+      const v = res.values || {};
+      const config = { ...dbConfig, server: dbConfig.server || String(v.server || '').trim(), database: dbConfig.database || String(v.database || '').trim() };
+      const account = windows ? null : { user: String(v.user || ''), password: String(v.password || '') };
+      failed = await tryDb(config, account);
       if (!failed) {
+        db.config = config;
         db.account = account;
         db.ready = true;
         meta.db = windows ? 'windows' : 'sql';
@@ -1362,7 +1379,8 @@ async function walk(o) {
 
     // ---- sign-in: always the user's; the script only waits until the browser leaves the sign-in pages ----
     const start = options.start || plan.start || '/';
-    const loginRe = plan.login ? new RegExp(plan.login, 'i') : DEFAULT_LOGIN;
+    const login = options.login || plan.login;
+    const loginRe = login ? new RegExp(login, 'i') : DEFAULT_LOGIN;
     const isReady = async () => plan.ready ? (await page.locator(plan.ready).count()) > 0 : !loginRe.test(page.url());
     const deadline = Date.now() + LOGIN_TIMEOUT_MS;
     // Each opening of the start page forgets what came before it: what the sign-in pages reported is not the walk's,

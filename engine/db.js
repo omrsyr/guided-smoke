@@ -13,14 +13,17 @@ const LOGINS = ['sql', 'windows'];
 const KEYS = ['server', 'database', 'login'];
 const TIMEOUT_MS = 90 * 1000;
 
-/** What is wrong with a db setting ({ server, database, login: 'sql' | 'windows' }), or null. */
+/**
+ * What is wrong with a db setting ({ server, database, login: 'sql' | 'windows' }), or null. A server or database left
+ * out is asked for in the engine's database tab, with the account.
+ */
 function checkDb(db, where) {
   if (db == null) return null;
   const plain = typeof db === 'object' && !Array.isArray(db);
   const unknown = plain ? Object.keys(db).filter(k => !KEYS.includes(k)) : [];
-  const text = v => typeof v === 'string' && v.trim() !== '';
+  const text = v => v == null || (typeof v === 'string' && v.trim() !== '');
   if (!plain || unknown.length || !text(db.server) || !text(db.database) || (db.login != null && !LOGINS.includes(db.login))) {
-    return `${where}: db must be { server: 'sql01', database: 'AppTest', login: 'sql' | 'windows' } (login defaults to 'sql').`;
+    return `${where}: db must be { server: 'sql01', database: 'AppTest', login: 'sql' | 'windows' } (login defaults to 'sql'; a server or database left out is typed in the database tab).`;
   }
   return null;
 }
@@ -52,12 +55,14 @@ function classify(output, error) {
   if (/Login failed|\b18456\b/i.test(text)) return 'login';
   if (/Cannot open database|\b4060\b/i.test(text)) return 'database';
   if (/network-related|server was not found|not accessible|TCP Provider|Named Pipes Provider|timeout expired|actively refused|No such host|error: (26|40|53)\b/i.test(text)) return 'network';
+  // Msg 229/230/262/300…: the account may read but not write (a read-only test account), or not touch that object.
+  if (/permission (was )?denied/i.test(text)) return 'permission';
   return 'query';
 }
 
 /**
  * Runs one batch of SQL on the database: { rows, affected, value } (value: the first column of the first row, as
- * text). A failure throws an Error with `.kind` (login, database, network, tool, timeout, query) and no text of
+ * text). A failure throws an Error with `.kind` (login, database, network, tool, timeout, permission, query) and no text of
  * sqlcmd's. The query goes in and the output comes back through files in a folder of this user's temp folder that is
  * removed at once: sqlcmd writes UTF-8 to a file whatever the console's code page is, while on the console its first
  * run in a process turns Turkish letters into plain ones.
@@ -75,9 +80,11 @@ function runSql({ db, account, query }) {
     env.SQLCMDUSER = account ? account.user : '';
     env.SQLCMDPASSWORD = account ? account.password : '';
   }
-  // -C trusts the server's certificate (a test server's own), -b turns an error into exit code 1, -h -1 drops column
-  // headers, -W trailing spaces; columns are split at tabs.
-  const args = ['-S', db.server, '-d', db.database, ...auth, '-C', '-b', '-l', '15', '-t', '60', '-h', '-1', '-W',
+  // -C trusts the server's certificate (a test server's own), -b turns an error into exit code 1, -I sets
+  // QUOTED_IDENTIFIER ON as applications have it (sqlcmd's default is OFF, and SQL Server then refuses to write to a
+  // table with a filtered index or an indexed view), -h -1 drops column headers, -W trailing spaces; columns are split
+  // at tabs.
+  const args = ['-S', db.server, '-d', db.database, ...auth, '-C', '-b', '-I', '-l', '15', '-t', '60', '-h', '-1', '-W',
     '-s', '\t', '-w', '65535', '-f', 'i:65001,o:65001', '-i', file, '-o', outFile];
   const [exe, argv] = command(args);
   return new Promise((resolve, reject) => {
