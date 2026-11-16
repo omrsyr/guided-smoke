@@ -1,8 +1,9 @@
 'use strict';
 // The walk's own way to a SQL Server test database: sqlcmd, with the account the user typed into the engine's own tab
-// (or the Windows account). The account lives only in this process's memory while the walk runs and reaches sqlcmd as
-// SQLCMDUSER / SQLCMDPASSWORD in its environment, never as an argument, a file or a record. sqlcmd's own messages may
-// name servers, users or data: they are sorted into a few kinds and never passed on.
+// (or the Windows account). The account lives only in this process's memory while the walk runs (in a suite, until its
+// last plan has run: the next plans on the same database do not ask again) and reaches sqlcmd as SQLCMDUSER /
+// SQLCMDPASSWORD in its environment, never as an argument, a file or a record. sqlcmd's own messages may name servers,
+// users or data: they are sorted into a few kinds and never passed on.
 
 const fs = require('fs');
 const os = require('os');
@@ -26,6 +27,20 @@ function checkDb(db, where) {
     return `${where}: db must be { server: 'sql01', database: 'AppTest', login: 'sql' | 'windows' } (login defaults to 'sql'; a server or database left out is typed in the database tab).`;
   }
   return null;
+}
+
+/**
+ * In a suite, whether the database an earlier plan connected to (or went on without) is this plan's too: `held` is
+ * the suite's { config, account, without }. It is when the sign-in is of the same kind and every server or database
+ * the plan names is the one held; a name the plan leaves out is the tester's to give, and was given once. Returns the
+ * plan's db with the held names filled in, or null: then the plan asks for itself.
+ */
+function sameDb(db, held) {
+  if (!db || !held || !held.config) return null;
+  if ((db.login || 'sql') !== (held.config.login || 'sql')) return null;
+  const same = (a, b) => String(a).trim().toLowerCase() === String(b || '').trim().toLowerCase();
+  if (['server', 'database'].some(key => db[key] && !same(db[key], held.config[key]))) return null;
+  return { ...db, server: db.server || held.config.server, database: db.database || held.config.database };
 }
 
 /** The sqlcmd to run: GUIDED_SMOKE_SQLCMD, else sqlcmd on the PATH. A .js file runs with this Node (the tests' stand-in). */
@@ -110,4 +125,4 @@ function version() {
   });
 }
 
-module.exports = { checkDb, runSql, parse, classify, version, LOGINS };
+module.exports = { checkDb, sameDb, runSql, parse, classify, version, LOGINS };

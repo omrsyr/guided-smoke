@@ -22,6 +22,7 @@ const LABELS = {
     recordings: 'Recordings', recordingsNote: 'they hold what the screen showed, cookies and page data: keep them on this machine and do not attach them to the work item',
     pass: 'passed', diff: 'different', skip: 'skipped', none: 'not run', reasons: { filter: 'filter', 'follows-skip': 'follows a skipped step', declined: 'not allowed', 'skip-writes': '--skip-writes', remote: 'remote address', probe: 'runs with --probe', 'no-db': 'no database' },
     db: 'Database', dbModes: { sql: 'connected with a SQL account', windows: 'connected with the Windows account', none: 'none: the steps that need it were skipped' },
+    dbKept: 'as answered earlier in the suite',
     errorsSummary: '⚠ Steps where the browser reported errors: {steps}. They are not on the screen; see "Browser errors".',
     errors: 'Browser errors', errorsNote: 'Counted from the browser: script errors, console errors, failed requests and HTTP errors (4xx/5xx). Only the kind, method, path (no query, id-like parts as •••), status and the script\'s place are kept; the messages were shown in the panel only. "•••" alone: the value box was open.',
     errorsIgnored: '{count} more matched the plan\'s ignoreErrors and are not counted.', errorsMore: '+{count} more',
@@ -64,6 +65,7 @@ const LABELS = {
     recordings: 'Kayıtlar', recordingsNote: 'ekranda görüneni, çerezleri ve sayfa verisini içerir: bu makinede tut, iş kaydına ekleme',
     pass: 'geçti', diff: 'farklı', skip: 'atlandı', none: 'koşulmadı', reasons: { filter: 'filtre', 'follows-skip': 'atlanan adımı izliyor', declined: 'izin verilmedi', 'skip-writes': '--skip-writes', remote: 'uzak adres', probe: '--probe ile koşar', 'no-db': 'veritabanı yok' },
     db: 'Veritabanı', dbModes: { sql: 'SQL hesabıyla bağlandı', windows: 'Windows hesabıyla bağlandı', none: 'yok: ona ihtiyaç duyan adımlar atlandı' },
+    dbKept: 'suite\'te daha önce cevaplandığı gibi',
     errorsSummary: '⚠ Tarayıcının hata bildirdiği adımlar: {steps}. Bunlar ekranda görünmez; bkz. "Tarayıcı hataları".',
     errors: 'Tarayıcı hataları', errorsNote: 'Tarayıcıdan sayıldı: JS hataları, konsol hataları, düşen istekler ve HTTP hataları (4xx/5xx). Yalnız tür, yöntem, yol (sorgusuz, kimlik benzeri parçalar •••), durum kodu ve betiğin yeri tutulur; mesajlar yalnız panelde gösterildi. Tek başına "•••": değer kutusu açıktı.',
     errorsIgnored: '{count} tanesi daha planın ignoreErrors listesine uydu, sayılmadı.', errorsMore: '+{count} tane daha',
@@ -188,7 +190,8 @@ function build(meta, events, prev) {
   lines.push(`- **${L.browser}:** ${meta.browser} (${meta.browserSource})${meta.locale ? ` · ${meta.locale}` : ''}`);
   if (meta.env) lines.push(`- **${L.env}:** ${meta.env}`);
   lines.push(`- **${L.base}:** ${meta.base}`);
-  if (meta.db) lines.push(`- **${L.db}:** ${L.dbModes[meta.db] || meta.db}`);
+  // In a suite the database tab is answered once: a later plan on the same database says that it was not asked.
+  if (meta.db) lines.push(`- **${L.db}:** ${L.dbModes[meta.db] || meta.db}${meta.dbKept ? ` (${L.dbKept})` : ''}`);
   if (meta.appVersion || meta.appVersionError) lines.push(`- **${L.app}:** ${meta.appVersion || `— (${L.appUnread.replace('{error}', () => meta.appVersionError)})`}`);
   lines.push(`- **${L.result}:** ${L.results[meta.result] || meta.result}${meta.error ? ` — ${meta.error}` : ''}`);
   if (meta.filter) lines.push(`- **${L.filter}:** ${meta.filter}`);

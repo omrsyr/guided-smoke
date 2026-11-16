@@ -122,7 +122,7 @@ The project is the git repository's folder name (override with `--project`). Dat
 
 - The user signs in. Never type, store, print or ask for a password; the browser's own password saving is off in the
   smoke profile. An account a step needs for an API call is typed by the user into the value box (`secretBox`); a
-  test database account (a plan with `db`) into the engine's own tab before the sign-in.
+  test database account (a plan with `db`) into the engine's own tab before the sign-in, once for a whole suite.
 - A permitted step (`approve`) is the only way to change anything outside the page. Show exactly what will change, limit
   it to one test record, and never print connection strings or keys. Give it an `undo` when the change can be put
   back: the walk puts it back when it ends, also after Stop.

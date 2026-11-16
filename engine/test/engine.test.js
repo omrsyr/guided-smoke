@@ -314,6 +314,26 @@ test('the report says whether the walk had its database, and why a step that nee
   assert.match(md, /\| 1 \| Count \| ⏭ skipped \(no database\) \|/);
   assert.match(report.build({ ...meta, db: 'sql', lang: 'tr' }, [], null).markdown, /\*\*Veritabanı:\*\* SQL hesabıyla bağlandı/);
   assert.doesNotMatch(report.build(meta, [], null).markdown, /Database/, 'a plan without a database: no line');
+  // A later plan of a suite was not asked: its report says where the answer came from.
+  assert.match(report.build({ ...meta, db: 'sql', dbKept: true }, [], null).markdown, /\*\*Database:\*\* connected with a SQL account \(as answered earlier in the suite\)\n/);
+  assert.match(report.build({ ...meta, db: 'none', dbKept: true, lang: 'tr' }, [], null).markdown, /\*\*Veritabanı:\*\* yok: ona ihtiyaç duyan adımlar atlandı \(suite'te daha önce cevaplandığı gibi\)\n/);
+});
+
+test('in a suite the database answered for one plan is the next plan\'s too only when it is the same one', () => {
+  const held = { config: { server: 'sql01', database: 'AppTest', login: 'sql' }, account: { user: 'u', password: 'p' }, without: false };
+  // A name the plan leaves out is the tester's, typed once; a name it gives must be the one connected to.
+  assert.deepStrictEqual(sqlDb.sameDb({ login: 'sql' }, held), { login: 'sql', server: 'sql01', database: 'AppTest' });
+  assert.deepStrictEqual(sqlDb.sameDb({ server: 'SQL01', database: 'apptest' }, held), { server: 'SQL01', database: 'apptest' });
+  assert.deepStrictEqual(sqlDb.sameDb({ server: 'sql01' }, held), { server: 'sql01', database: 'AppTest' });
+  for (const other of [{ server: 'sql02' }, { database: 'Other' }, { server: 'sql01', database: 'AppTest', login: 'windows' }]) {
+    assert.strictEqual(sqlDb.sameDb(other, held), null, JSON.stringify(other));
+  }
+  assert.strictEqual(sqlDb.sameDb({ login: 'sql' }, null), null, 'a walk of its own');
+  assert.strictEqual(sqlDb.sameDb({ login: 'sql' }, { config: null, account: null, without: false }), null, 'the suite\'s first plan with a database');
+  // "Continue without" answered before a name was typed holds for the plans that name none.
+  const without = { config: { login: 'sql' }, account: null, without: true };
+  assert.ok(sqlDb.sameDb({}, without));
+  assert.strictEqual(sqlDb.sameDb({ server: 'sql01' }, without), null);
 });
 
 test('a Windows sign-in the browser did not send says what to add; one refused although allowed says where to look', () => {

@@ -10,7 +10,7 @@ const { texts, format } = require('./i18n');
 const { Bucket, fromConsole, fromPageError, fromResponse, fromFailed, compileIgnore, total: errorTotal, ABORTED } = require('./errors');
 const { Network, findingTotal } = require('./network');
 const probing = require('./probe');
-const { runSql } = require('./db');
+const { runSql, sameDb } = require('./db');
 
 const PACE = { slow: 400, normal: 200, fast: 60 };
 const DEFAULT_LOGIN = /(login|signin|sign-in|giris|auth|account\/)/i;
@@ -678,6 +678,8 @@ function firstLine(error) {
  * @param {string} o.walkDir    created by the caller
  * @param {string} o.profile    browser profile folder (ignored with fresh)
  * @param {object} o.playwright playwright-core
+ * @param {object} [o.dbSession] in a suite: { config, account, without }, what the database tab was answered with for
+ *                                an earlier plan; the walk reads it and writes its own answer there
  * @param {object} o.options    { browser, base, pace, allowed:Set|null, filterNote, skipWrites, allowRemoteWrites, workItem,
  *                                fresh, screens:'diff'|'all'|null, locale, lang, keepDownloads, auto, trace, video,
  *                                panel: { side:'left'|'right', min }, network: compileConfig(plan.network)|null, probe,
@@ -1225,6 +1227,10 @@ async function walk(o) {
   // `config` is the plan's db with what the tab asked for filled in (a server or database the plan left out).
   const db = { config: null, account: null, ready: false };
   if (dbConfig) meta.db = 'none';
+  // In a suite, what one plan's tab was answered with holds for the next plans on the same database: the account, or
+  // "continue without". `held` is the suite's { config, account, without }, kept by the process that walks the suite,
+  // in memory only, until the suite ends.
+  const held = o.dbSession || null;
   const sqlRun = async query => {
     if (!db.ready) throw new Error(dbConfig ? t.dbNone : t.dbNotSet);
     try {
@@ -1243,42 +1249,64 @@ async function walk(o) {
   const connectDb = async () => {
     if (!dbConfig) return null;
     const windows = (dbConfig.login || 'sql') === 'windows';
-    const complete = !!(dbConfig.server && dbConfig.database);
-    let failed = windows && complete ? await tryDb(dbConfig, null) : null;
-    if (windows && complete && !failed) {
-      db.config = dbConfig;
+    const connected = (config, account) => {
+      db.config = config;
+      db.account = account;
       db.ready = true;
-      meta.db = 'windows';
+      meta.db = windows ? 'windows' : 'sql';
+      if (held) Object.assign(held, { config, account, without: false });
+    };
+    // The suite's earlier answer, when it was given for this database.
+    const kept = sameDb(dbConfig, held);
+    if (kept && held.without) {
+      meta.dbKept = true;
       saveMeta();
       return null;
     }
+    // Tried without asking: the Windows account, or the account the suite already has for this database. Only a
+    // failure opens the tab, with the reason.
+    const known = kept || dbConfig;
+    const unasked = !!(known.server && known.database) && (windows || !!(kept && held.account));
+    let failed = unasked ? await tryDb(known, windows ? null : held.account) : null;
+    if (unasked && !failed) {
+      connected(known, windows ? null : held.account);
+      if (kept) meta.dbKept = true;
+      saveMeta();
+      return null;
+    }
+    // The suite's account refused for the database it was typed for (its password changed, the server is away): the
+    // names stay as they were typed then, and only the account is asked for again.
+    const asked = failed && kept ? kept : dbConfig;
+    const complete = !!(asked.server && asked.database);
     const tab = await context.newPage();
     const tabVideo = options.video ? tab.video() : null;
     let answer = null;
-    const tabClosed = new Promise(resolve => tab.once('close', () => resolve({ a: 'skip' })));
+    const tabClosed = new Promise(resolve => tab.once('close', () => resolve({ a: 'skip', tabClosed: true })));
     await tab.exposeFunction('__guidedSmokeDb', (a, values) => {
       if (answer) { const r = answer; answer = null; r({ a, values: values || {} }); }
     });
     await tab.evaluate(drawDbForm, {
-      title: t.dbTitle, intro: windows ? t.dbIntroWindows : t.dbIntro, windows, serverLabel: t.dbServer, server: dbConfig.server || null,
-      databaseLabel: t.dbDatabase, database: dbConfig.database || null, userLabel: t.dbUser, passwordLabel: t.dbPassword,
-      connect: windows && complete ? t.dbRetry : t.dbConnect, skip: t.dbSkip, stop: t.stop, note: t.dbNote, busy: t.dbBusy, empty: t.dbEmpty,
+      title: held ? t.dbTitleSuite : t.dbTitle, intro: windows ? t.dbIntroWindows : held ? t.dbIntroSuite : t.dbIntro, windows,
+      serverLabel: t.dbServer, server: asked.server || null,
+      databaseLabel: t.dbDatabase, database: asked.database || null, userLabel: t.dbUser, passwordLabel: t.dbPassword,
+      connect: windows && complete ? t.dbRetry : t.dbConnect, skip: t.dbSkip, stop: t.stop, note: held ? t.dbNoteSuite : t.dbNote, busy: t.dbBusy, empty: t.dbEmpty,
       error: failed ? t.dbKinds[failed] : '',
     });
     let outcome = null;
     for (;;) {
       const res = await Promise.race([new Promise(resolve => { answer = resolve; }), tabClosed]);
       if (closed || res.a === 'stop') { outcome = 'stop'; break; }
-      if (res.a !== 'connect') break;
+      if (res.a !== 'connect') {
+        // "Continue without the database" is an answer, and holds for the suite; a tab that was closed is not one.
+        if (held && !res.tabClosed) Object.assign(held, { config: { ...dbConfig }, account: null, without: true });
+        break;
+      }
       const v = res.values || {};
-      const config = { ...dbConfig, server: dbConfig.server || String(v.server || '').trim(), database: dbConfig.database || String(v.database || '').trim() };
+      const config = { ...asked, server: asked.server || String(v.server || '').trim(), database: asked.database || String(v.database || '').trim() };
       const account = windows ? null : { user: String(v.user || ''), password: String(v.password || '') };
       failed = await tryDb(config, account);
       if (!failed) {
-        db.config = config;
-        db.account = account;
-        db.ready = true;
-        meta.db = windows ? 'windows' : 'sql';
+        connected(config, account);
         break;
       }
       await tab.evaluate(text => window.__guidedSmokeDbError(text), t.dbKinds[failed]).catch(() => {});

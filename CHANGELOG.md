@@ -15,6 +15,13 @@
     last plan.
   - **■ Stop** in a step, or closing the window, ends the suite: the plans after it are "not walked". A plan that ends
     with an error ends only itself; the next plan is walked, and the command ends with exit code 1.
+  - The test database tab is answered once for the suite. The account typed for one plan is kept in the memory of the
+    process that walks the suite until its last plan has run, and the next plans on the same database are not asked:
+    the same sign-in kind, and every server or database a plan names is the one connected to (a plan that leaves the
+    names out takes the ones typed). **Continue without the database** holds for them too; a tab closed unanswered does
+    not. A plan that names another database asks for itself, and an account the server refuses later is asked for
+    again, with the names as typed. The report of a plan that was not asked says "as answered earlier in the suite".
+    The account is written to no file, as before, and is dropped when the suite ends.
   - The suite's record and report are kept as `suites/<folder>-<n>/` in the project's data folder, numbered and never
     overwritten: a row per plan with its walk, how it ended, its counts, time and what its own report flags; where the
     suite was stopped, the plans not walked or ended with an error, changes not put back; every ✖ with its note; a

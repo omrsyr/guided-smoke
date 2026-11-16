@@ -805,6 +805,87 @@ test('the test database: its own tab before the sign-in asks again after a refus
   }
 });
 
+test('in a suite the database tab is answered once: the next plans on the same database are not asked, another database or a refused account asks again, "continue without" holds too but a closed tab does not; the account is in no record', { skip, timeout: 180000 }, async () => {
+  const app = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><title>t</title><h1 id="page">page</h1>');
+  });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-db-'));
+  const log = path.join(dir, 'sqlcmd.jsonl');
+  const answers = path.join(dir, 'answers.json');
+  fs.writeFileSync(answers, JSON.stringify({ 'SELECT COUNT(*) FROM orders': '3\r\n\r\n(1 rows affected)\r\n' }));
+  const password = 'Db-Pa55-typed-once';
+  const env = { GUIDED_SMOKE_SQLCMD: path.join(__dirname, 'fake-sqlcmd.js'), FAKE_SQLCMD_ACCOUNT: `smoke-user:${password}`, FAKE_SQLCMD_LOG: log, FAKE_SQLCMD_ANSWERS: answers };
+  const before = Object.fromEntries(Object.keys(env).map(k => [k, process.env[k]]));
+  Object.assign(process.env, env);
+  const t = texts('en');
+  const walkDirs = [];
+  // One plan of a suite: `session` is the suite's, as run.js keeps it from plan to plan. `typed`: the harness's answers
+  // to the database tab; ['stop'] where no tab is expected, so that one opening after all would stop the walk.
+  const walkWith = async (session, db, typed) => {
+    const walkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-smoke-demo-'));
+    walkDirs.push(walkDir);
+    const dbErrors = [];
+    const plan = { id: 'db', ready: '#page', db, steps: [{ title: 'Count', did: 'x', expect: ['x'], db: true,
+      run: async ({ sql, state }) => { state.n = (await sql('SELECT COUNT(*) FROM orders')).value; },
+      check: async ({ state }) => [state.n === '3', String(state.n)] }] };
+    const { meta } = await autoWalk({ playwright, plan, browser: chosen, base, lang: 'en', walkDir, db: typed, dbErrors, dbSession: session,
+      options: { suite: { id: 'nightly-1', index: 1, total: 1, next: null } } });
+    const events = readEvents(walkDir);
+    return { meta, dbErrors, counted: events.some(e => e.n === 1 && e.auto && e.auto.ok), skipped: events.some(e => e.n === 1 && e.reason === 'no-db') };
+  };
+  const seen = w => [w.meta.result, w.meta.db, !!w.meta.dbKept, w.dbErrors, w.counted];
+  try {
+    // The first plan names nothing: the tab asks for the server, the database and the account.
+    const suite = { config: null, account: null, without: false };
+    assert.deepStrictEqual(seen(await walkWith(suite, { login: 'sql' }, [{ server: 'sql01', database: 'AppTest', user: 'smoke-user', password }])), ['completed', 'sql', false, [''], true]);
+    assert.deepStrictEqual([suite.config.server, suite.config.database, suite.without], ['sql01', 'AppTest', false]);
+    // A plan that names the same database, and one that names none, are not asked: sql() works on the suite's account.
+    for (const db of [{ server: 'SQL01', database: 'apptest' }, { login: 'sql' }]) {
+      assert.deepStrictEqual(seen(await walkWith(suite, db, ['stop'])), ['completed', 'sql', true, [], true], JSON.stringify(db));
+    }
+    // Another database asks for itself, and its answer is the suite's from then on.
+    assert.deepStrictEqual(seen(await walkWith(suite, { server: 'sql01', database: 'Archive' }, [{ user: 'smoke-user', password }])), ['completed', 'sql', false, [''], true]);
+    assert.strictEqual(suite.config.database, 'Archive');
+    // The suite's account is refused later (its password changed): the tab says why and asks for the account only.
+    process.env.FAKE_SQLCMD_ACCOUNT = `smoke-user:${password}-2`;
+    assert.deepStrictEqual(seen(await walkWith(suite, { login: 'sql' }, [{ user: 'smoke-user', password: `${password}-2` }])), ['completed', 'sql', false, [t.dbKinds.login], true]);
+    const last = fs.readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l)).pop();
+    assert.deepStrictEqual([last.args[last.args.indexOf('-S') + 1], last.args[last.args.indexOf('-d') + 1], last.user], ['sql01', 'Archive', 'smoke-user'], 'the names typed for the suite stayed');
+
+    // A tab closed unanswered goes on without the database for that plan only; "Continue without" is an answer and holds.
+    const without = { config: null, account: null, without: false };
+    const closedTab = await walkWith(without, { login: 'sql' }, ['close']);
+    assert.deepStrictEqual([closedTab.meta.db, closedTab.skipped, without.without], ['none', true, false]);
+    const skipped = await walkWith(without, { login: 'sql' }, ['skip']);
+    assert.deepStrictEqual([skipped.meta.db, !!skipped.meta.dbKept, without.without], ['none', false, true]);
+    const after = await walkWith(without, { login: 'sql' }, ['stop']);
+    assert.deepStrictEqual([after.meta.result, after.meta.db, after.meta.dbKept, after.dbErrors, after.skipped], ['completed', 'none', true, [], true]);
+    // A plan that names a database was not answered for: it asks.
+    assert.deepStrictEqual(seen(await walkWith(without, { server: 'sql01', database: 'AppTest' }, [{ user: 'smoke-user', password: `${password}-2` }])), ['completed', 'sql', false, [''], true]);
+    assert.strictEqual(without.without, false);
+
+    // The Windows account: the names typed for one plan serve the next, and no tab opens.
+    const windows = { config: null, account: null, without: false };
+    assert.deepStrictEqual(seen(await walkWith(windows, { server: 'sql01', database: 'AppTest', login: 'windows' }, ['stop'])), ['completed', 'windows', false, [], true]);
+    assert.deepStrictEqual(seen(await walkWith(windows, { login: 'windows' }, ['stop'])), ['completed', 'windows', true, [], true]);
+
+    // The account is in sqlcmd's environment only, and in no record of any walk.
+    const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+    assert.ok(calls.every(c => !c.args.some(a => a.includes(password))), 'no password in sqlcmd\'s arguments');
+    const files = [];
+    const collect = d => fs.readdirSync(d, { withFileTypes: true }).forEach(f => (f.isDirectory() ? collect(path.join(d, f.name)) : files.push(path.join(d, f.name))));
+    walkDirs.forEach(collect);
+    assert.ok(files.length >= walkDirs.length && files.every(f => !fs.readFileSync(f, 'utf8').includes(password) && !fs.readFileSync(f, 'utf8').includes('smoke-user')), 'the account is in no record');
+  } finally {
+    for (const [k, v] of Object.entries(before)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    await new Promise(resolve => app.close(resolve));
+    for (const d of [dir, ...walkDirs]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test('a suite: each plan is a walk of its own, the closing screen leads on to the next plan or ends the suite, ■ Stop ends it, an error ends only its plan; one report over them all', { skip, timeout: 180000 }, async () => {
   const app = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });

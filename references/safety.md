@@ -32,6 +32,11 @@
   walk, reaches `sqlcmd` as `SQLCMDUSER` / `SQLCMDPASSWORD` in its environment (never an argument, a file, a record or
   a trace), and with `--video` that tab's recording is deleted. sqlcmd's messages are reduced to their kind. Ask for
   an account limited to the test database (read, and write only where the plan's permitted steps need it).
+- In a suite (`run <folder>`) that account is typed once: the one process that walks the suite keeps it in memory
+  until the last plan has run, and the next plans use it only for the database it was typed for (the same sign-in
+  kind, and every server or database a plan names is the one connected to). A plan that names another server or
+  database asks for itself; an account the server refuses later is asked for again. It is dropped when the suite ends,
+  also after ■ Stop or an error, and is written to no file: the suite's record holds plan names and outcomes only.
 - Never print connection strings, keys, license keys or file contents into the panel, the events, the report or the
   chat. Read configuration without echoing it.
 

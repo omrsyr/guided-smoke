@@ -499,7 +499,7 @@ function tools(flags) {
  * Walks a prepared plan: opens the browser, writes the report. Resolves to { walkId, result, stopSuite }; an error
  * carries the walk's id. `suite`: the walk's place in a suite, as suite.runAll hands it over.
  */
-async function startWalk({ project, planId, source, plan, env, allowed, filterNote, base, panel, chosen, playwright, flags, suite = null }) {
+async function startWalk({ project, planId, source, plan, env, allowed, filterNote, base, panel, chosen, playwright, flags, suite = null, dbSession = null }) {
   const walkId = store.nextWalkId(project, planId);
   const walkDir = store.walkDir(project, walkId);
   fs.mkdirSync(walkDir, { recursive: true });
@@ -511,7 +511,7 @@ async function startWalk({ project, planId, source, plan, env, allowed, filterNo
   let done;
   try {
     done = await walk({
-      plan, planId, walkId, project, walkDir, playwright, profile: store.profileDir(project, chosen.name),
+      plan, planId, walkId, project, walkDir, playwright, profile: store.profileDir(project, chosen.name), dbSession,
       options: {
         browser: chosen, base, pace: flags.pace || 'slow', allowed, filterNote, skipWrites: !!flags['skip-writes'],
         allowRemoteWrites: !!flags['allow-remote-writes'], workItem: flags['work-item'] || plan.workItem || null,
@@ -597,12 +597,19 @@ async function runSuite({ project, folder, flags }) {
   });
   console.log(`suite ${suite.suiteId} · ${ready.length} plan${ready.length > 1 ? 's' : ''}${flags.env ? ` · env ${flags.env}` : ''}: ${ready.map(p => p.planId).join(', ')}`);
   const byId = new Map(ready.map(p => [p.planId, p]));
-  await suites.runAll({
-    suite, save,
-    walkOne: (p, at) => startWalk({ project, ...byId.get(p.planId), ...shared, flags, suite: at }),
-    // A walk's error ends that plan only: it is said here, in one line, and the next plan is walked.
-    onError: p => console.error(`error in ${p.walkId || p.planId}: ${p.error}`),
-  });
+  // What the database tab was answered with for one plan holds for the next plans on the same database: the account
+  // is typed once. It is kept here, in this process's memory, and dropped when the suite ends, however it ends.
+  const dbSession = { config: null, account: null, without: false };
+  try {
+    await suites.runAll({
+      suite, save,
+      walkOne: (p, at) => startWalk({ project, ...byId.get(p.planId), ...shared, flags, suite: at, dbSession }),
+      // A walk's error ends that plan only: it is said here, in one line, and the next plan is walked.
+      onError: p => console.error(`error in ${p.walkId || p.planId}: ${p.error}`),
+    });
+  } finally {
+    dbSession.account = null;
+  }
   const r = suites.writeReport(project, suite.suiteId);
   console.log(`suite report: ${r.file}`);
   console.log(`suite result: ${suite.result} · plans ${r.walked}/${r.total} walked · ✔${r.counts.pass} ✖${r.counts.diff} ⏭${r.counts.skip} ○${r.counts.none}${r.notWalked.length ? ` · not walked: ${r.notWalked.join(', ')}` : ''}${r.errors.length ? ` · ⚠ ended with an error: ${r.errors.join(', ')}` : ''}${r.undoLeft.length ? ` · ⚠ not put back (undo) in: ${r.undoLeft.join(', ')}` : ''}`);

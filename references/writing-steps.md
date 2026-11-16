@@ -176,6 +176,12 @@ For an API that needs the user's account, the project's database tool, or a back
     ("no database", following its `skipTo` as a declined step does); `sql()` elsewhere then throws. Mark every step
     that needs the database `db: true`.
 
+    In a suite (`run <folder>`) the tab is answered once: the next plans on the same database use that account, or go
+    on without the database if that was the answer, and their reports say "as answered earlier in the suite". The same
+    database means the same `login` kind and that every server or database the plan names is the one connected to; a
+    plan that leaves the names out takes the ones typed. So the plans of one folder share their `db` through the
+    module they share their environments with. A plan that names another database asks for itself.
+
     `sql()` returns `rows` (arrays of text, `NULL` as written), `affected` (the last "rows affected" count) and `value`
     (the first column of the first row). A failure says only its kind (the account, the database, the network, sqlcmd
     missing, no permission, a query): sqlcmd's message may hold data and is never shown. Write fixed query text with

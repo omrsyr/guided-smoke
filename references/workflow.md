@@ -107,6 +107,9 @@ the test server (`run smoke/ --env test`).
 - Each plan is a walk of its own: a browser window of its own with the project's smoke profile, its own walk number
   and report. Every panel's header says where in the suite it is ("Plan 2/5 · Smoke 3 / 9"). Between two plans the
   closing screen names the next plan: **▶ Next plan** goes on, **■ Stop the suite** ends there.
+- The database tab (a plan with `db`) is answered once: the account typed for one plan serves the next plans on the
+  same database, and so does **Continue without the database**. A plan that names another server or database asks
+  for itself ([writing steps](writing-steps.md) rule 20).
 - **■ Stop** in a step, or closing the window, ends the suite: the plans after it are "not walked". A plan that ends
   with an error (its application did not answer) ends only itself: the next plan is walked, and the command ends with
   exit code 1.

@@ -22,7 +22,9 @@ const { walk } = require('../engine');
  * @param {boolean} [o.letAuto]  leave a panel alone while its --auto countdown runs
  * @param {string} [o.stopAt]    press Stop on the panel with this title instead of answering it
  * @param {Array} [o.db]         answers for the engine's database tab, in order: the fields to type ({ server,
- *                               database, user, password }, any of them) then Connect, or 'skip' or 'stop'
+ *                               database, user, password }, any of them) then Connect, or 'skip' or 'stop', or 'close'
+ *                               (the tab is closed unanswered)
+ * @param {object} [o.dbSession] a suite's database answer, shared by the walks of one test
  * @param {string[]} [o.dbErrors] receives the tab's error line as it was before each answer
  * @param {string[][]} [o.launched] receives the browser's command-line switches the walk asked for
  * @param {object} [o.options]   more walk options (auto, trace, video, panel)
@@ -51,6 +53,7 @@ async function autoWalk(o) {
         if (!(await form.count().catch(() => 0))) continue;
         if (o.dbErrors) o.dbErrors.push(await form.locator('[data-guided-smoke-db-error]').textContent());
         const next = dbAnswers.shift();
+        if (next === 'close') { await tab.close(); continue; }
         if (typeof next === 'object') {
           for (const [name, value] of Object.entries(next)) await form.locator(`[data-guided-smoke-db="${name}"]`).fill(value);
         }
@@ -93,7 +96,7 @@ async function autoWalk(o) {
   try {
     return await walk({
       plan: o.plan, planId: o.plan.id || 'plan', walkId: o.walkId || `${o.plan.id || 'plan'}-1`, project: o.project || 'test', walkDir: o.walkDir,
-      playwright, profile: o.profile || null,
+      playwright, profile: o.profile || null, dbSession: o.dbSession || null,
       options: { browser: o.browser, base: o.base, pace: 'fast', allowed: null, fresh: !o.profile, lang: o.lang,
         locale: o.lang === 'tr' ? 'tr-TR' : 'en-US', screens: null, ...(o.options || {}) },
     });
