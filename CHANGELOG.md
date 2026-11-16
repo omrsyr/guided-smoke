@@ -22,6 +22,13 @@
     not. A plan that names another database asks for itself, and an account the server refuses later is asked for
     again, with the names as typed. The report of a plan that was not asked says "as answered earlier in the suite".
     The account is written to no file, as before, and is dropped when the suite ends.
+  - The suite's record and report are kept as `suites/<folder>-<n>/` in the project's data folder, numbered and never
+    overwritten: a row per plan with its walk, how it ended, its counts, time and what its own report flags; where the
+    suite was stopped, the plans not walked or ended with an error, changes not put back; every ✖ with its note; a
+    block to paste. A walk's own report names the suite it was a plan of.
+  - `--from`, `--only`, `--retry-failed`, `--work-item` and `--force` belong to one plan and are refused for a folder.
+    A name that is both a folder here and a plan of the project is refused, not guessed; written as a path
+    (`./smoke`) it is the folder.
 - **Plans from a work item, for a tester who was not there when the change was made.** The workflow now says how to
   make a plan from a work item alone (the item, the commits linked to it, the repository), and what to do with a thin
   one: a draft from the diff, at most three questions with defaults, never a plan written from the code in silence.
@@ -40,13 +47,6 @@
   install, a walk of one plan and of a folder on a shared test server, what each button and question means, reading
   the report, the retry after a fix, a plan from a work item with Claude, what makes a work item ready for a smoke,
   and what to do when something goes wrong. The README gains "A folder of plans: a suite".
-  - The suite's record and report are kept as `suites/<folder>-<n>/` in the project's data folder, numbered and never
-    overwritten: a row per plan with its walk, how it ended, its counts, time and what its own report flags; where the
-    suite was stopped, the plans not walked or ended with an error, changes not put back; every ✖ with its note; a
-    block to paste. A walk's own report names the suite it was a plan of.
-  - `--from`, `--only`, `--retry-failed`, `--work-item` and `--force` belong to one plan and are refused for a folder.
-    A name that is both a folder here and a plan of the project is refused, not guessed; written as a path
-    (`./smoke`) it is the folder.
 
 ## 1.5.0 — 2026-11-16
 
