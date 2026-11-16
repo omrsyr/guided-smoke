@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.0 — 2026-11-16
 
 - **Suites: a folder of plans walked in one go.** `run <folder>` walks every plan of the folder one after another
   (`run smoke/ --env test` on a shared test server) and writes one report over them all. The plans are the folder's
