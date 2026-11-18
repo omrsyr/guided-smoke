@@ -791,6 +791,11 @@ test('the test database: its own tab before the sign-in asks again after a refus
     assert.deepStrictEqual([stopped.meta.result, stopped.meta.error], ['stopped', 'stopped at the database form']);
     assert.deepStrictEqual(asked, []);
 
+    // The whole browser closed with the tab open: a stop too (so a suite ends), not an error on a closed page.
+    const quit = await walkWith(['quit']);
+    assert.deepStrictEqual([quit.meta.result, quit.meta.error], ['stopped', 'browser closed before sign-in']);
+    assert.deepStrictEqual(asked, []);
+
     // A plan that leaves out the server and the database: the tab asks for them with the account.
     const typed = await walkWith([{ server: 'sql01', database: 'AppTest', user: 'smoke-user', password }], {}, { ...plan, db: { login: 'sql' } });
     assert.strictEqual(typed.meta.db, 'sql');

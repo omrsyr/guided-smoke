@@ -23,7 +23,7 @@ const { walk } = require('../engine');
  * @param {string} [o.stopAt]    press Stop on the panel with this title instead of answering it
  * @param {Array} [o.db]         answers for the engine's database tab, in order: the fields to type ({ server,
  *                               database, user, password }, any of them) then Connect, or 'skip' or 'stop', or 'close'
- *                               (the tab is closed unanswered)
+ *                               (the tab is closed unanswered), or 'quit' (the whole browser is closed with the tab open)
  * @param {object} [o.dbSession] a suite's database answer, shared by the walks of one test
  * @param {string[]} [o.dbErrors] receives the tab's error line as it was before each answer
  * @param {string[][]} [o.launched] receives the browser's command-line switches the walk asked for
@@ -54,6 +54,7 @@ async function autoWalk(o) {
         if (o.dbErrors) o.dbErrors.push(await form.locator('[data-guided-smoke-db-error]').textContent());
         const next = dbAnswers.shift();
         if (next === 'close') { await tab.close(); continue; }
+        if (next === 'quit') { await context.close(); break; }
         if (typeof next === 'object') {
           for (const [name, value] of Object.entries(next)) await form.locator(`[data-guided-smoke-db="${name}"]`).fill(value);
         }

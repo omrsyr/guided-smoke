@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.1 — 2026-11-18
+
+- **Closing the window while the test database tab is open ends the suite.** In a suite walked on a test server, the
+  window was closed while the next plan's database tab was open: the tab read as closed unanswered, the start page
+  then failed on the closed browser, and the plan ended with an error, so the suite went on and opened the next plan.
+  The walk now ends as stopped ("browser closed before sign-in"), as it does when the window is closed at the
+  sign-in, and the suite ends with it. A start page that fails while the browser is still open is an error, as
+  before.
+
 ## 1.6.0 — 2026-11-16
 
 - **Suites: a folder of plans walked in one go.** `run <folder>` walks every plan of the folder one after another

@@ -1427,8 +1427,13 @@ async function walk(o) {
       try {
         await ctx.goto(start);
       } catch (e) {
-        const hint = signInError(e && e.message, { signIn, base, env: options.env });
-        throw hint ? new Error(hint) : e;
+        // The browser closed while the database tab was open: its close events can come after the tab's own, so the
+        // form reads as unanswered and the start page fails on a closed page. That is a stop, handled below.
+        if (closed || page.isClosed()) closed = true;
+        else {
+          const hint = signInError(e && e.message, { signIn, base, env: options.env });
+          throw hint ? new Error(hint) : e;
+        }
       }
     }
     while (!dbStop && !closed && !(await isReady().catch(() => false))) {
